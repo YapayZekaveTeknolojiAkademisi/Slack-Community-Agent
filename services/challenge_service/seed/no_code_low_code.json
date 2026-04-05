@@ -1,0 +1,89 @@
+{
+  "table": "challenge_types",
+  "data": [
+    {
+      "category": "no_code_low_code",
+      "name": "AI Destekli E-Posta Yanıtlama (Gmail → Taslak → Slack / Mail)",
+      "description": "Problem: Gelen kutusu dolu; sık sorulan sorulara tekrar tekrar benzer yanıtlar yazılıyor; ekip içi onay veya eskalasyon gecikiyor. Hedef: No-code/low-code orkestrasyon (ör. n8n, Make, Zapier) ile Gmail’de yeni veya etiketli mailleri tetikleyip OpenAI veya benzeri LLM ile yanıt taslağı üreten akış. Kullanıcı taslak Slack kanalına veya ikinci bir e-posta adresine iletilsin (gönderim politikası dokümante). Kapsam: Tam otomatik müşteriye gönderim yerine ‘taslak + onay’ MVP’si önerilir; OAuth kapsamları ve veri minimizasyonu README’de.",
+      "deadline_hours": 72,
+      "checklist": [
+        "Akış aracı seçimi ve export: n8n/Make/Zapier workflow JSON veya ekran görüntüsü + adım adım kurulum README’de",
+        "Gmail tetikleyicisi: yeni mail veya belirli etiket/filtre; gereksiz tetiklemeyi azaltmak için koşul (gönderen, konu)",
+        "OpenAI (veya eşdeğer) düğümü: sistem/kullanıcı prompt şablonu; API anahtarı ortam değişkeninde, repoda yok",
+        "Çıktı: yanıt taslağı + özet konu satırı; token/limit ve hata dalı (LLM başarısız → bildirim)",
+        "Slack veya e-posta ile teslim: kanal/DM veya ikinci adres; mesajda orijinal mail referansı (konu veya Message-ID)",
+        "Güvenlik: OAuth scope’ları listelenmiş; hassas içerik loglanmıyor veya maskeleniyor notu",
+        "Test senaryosu: örnek gelen mail ile uçtan uca bir kez çalıştırılmış akış kanıtı (log veya ekran)",
+        "İsteğe bağlı: insan onayı düğümü (Slack butonu veya manuel adım dokümante)"
+      ],
+      "meta": {
+        "product_focus": "ai_email_reply_orchestration",
+        "stack_examples": ["n8n", "make", "zapier", "gmail", "openai", "slack"],
+        "non_goals_mvp": ["otomatik_musteriye_gonderim_zorunlu"]
+      }
+    },
+    {
+      "category": "no_code_low_code",
+      "name": "AI Destekli İçerik Ajandası (Konu + Takvim → Sheet / Takvim)",
+      "description": "Problem: Blog ve sosyal içerik düzensiz; fikir anlık geliyor, yayın takvimi boş kalıyor. Hedef: Belirlenen konu listesi ve sıklığa göre n8n (veya eşdeğer) ile LLM’den başlık/özet/gönderi metni üreten zamanlanmış workflow; çıktı Google Sheet’e satır ekler ve isteğe bağlı Google Takvim’de taslak etkinlik oluşturur. Kullanıcı konuları ve takvimi Sheet veya form üzerinden yönetebilir. Kapsam dışı: Otomatik Instagram/Facebook API ile yayın zorunlu değil; metin üretimi + planlama yeterli.",
+      "deadline_hours": 72,
+      "checklist": [
+        "Zamanlayıcı veya Sheet satırı tetikleyicisi: haftalık/ günlük üretim net tanımlı",
+        "Konu kaynağı: Google Sheet sütunları (tema, kanal, ton) veya statik liste dokümante",
+        "LLM düğümü: başlık, kısa özet, gönderi metni (karakter sınırı); çıktı yapılandırılmış (JSON veya ayrıştırılmış alanlar)",
+        "Google Sheets: yeni satır veya güncelleme; sütun eşlemesi (tarih, konu, metin, durum)",
+        "İsteğe bağlı: Google Calendar’da taslak etkinlik (başlık + açıklama + hatırlatma)",
+        "Hata yönetimi: API kotası veya boş konu için bildirim veya Sheet’e ‘hata’ satırı",
+        "Workflow export + README: env değişkenleri, Sheet şablon linki veya örnek CSV",
+        "Test: en az bir üretim döngüsü ekran görüntüsü veya Sheet çıktısı"
+      ],
+      "meta": {
+        "product_focus": "ai_content_calendar_sheet",
+        "stack_examples": ["n8n", "google_sheets", "google_calendar", "openai"],
+        "non_goals_mvp": ["sosyal_api_ile_otomatik_yayin_zorunlu"]
+      }
+    },
+    {
+      "category": "no_code_low_code",
+      "name": "Anlık Lead Bildirimi (Form → Slack veya Teams)",
+      "description": "Problem: Web formu doldurulunca e-posta gecikiyor veya CRM’e düşmeden kayboluyor; satış ekibi anında haberdar olmuyor. Hedef: Typeform, Google Forms, Tally, Webflow form veya basit webhook ile gelen gönderimi n8n/Make/Zapier üzerinden Slack veya Microsoft Teams kanalına anlık mesaj olarak ileten akış. Alan eşlemesi: ad, e-posta, telefon, mesaj vb. Kapsam dışı: Tam CRM yazılımı entegrasyonu zorunlu değil; isteğe bağlı Sheet satırı.",
+      "deadline_hours": 48,
+      "checklist": [
+        "Form veya webhook kaynağı: URL ve tetikleyici türü README’de (ör. form submit, webhook POST JSON)",
+        "Slack veya Teams: hedef kanal/webhook; mesaj şablonu okunaklı (emoji isteğe bağlı, profesyonel ton)",
+        "Alan eşlemesi: en az 3 alan (ör. isim, e-posta, mesaj); eksik alan için varsayılan veya ‘—’",
+        "Güvenlik: webhook secret doğrulama veya imza (araç destekliyorsa); açık endpoint uyarısı README’de",
+        "Spam / tekrar: basit koruma notu (rate limit veya honeypot form tarafında)",
+        "İsteğe bağlı: aynı veriyi Google Sheet’e satır ekleme",
+        "Workflow export + kurulum adımları; test için örnek POST gövdesi",
+        "Test: örnek form gönderimi ile kanalda mesaj kanıtı"
+      ],
+      "meta": {
+        "product_focus": "instant_lead_notification",
+        "stack_examples": ["n8n", "make", "zapier", "slack", "microsoft_teams", "webhook"],
+        "non_goals_mvp": ["tam_crm_entegrasyonu_zorunlu"]
+      }
+    },
+    {
+      "category": "no_code_low_code",
+      "name": "AI Sosyal Medya Planlayıcı (Konu → Metin + Saat + Sheet)",
+      "description": "Problem: Sosyal medya gönderileri düzensiz; metin üretimi ve yayın saatleri elle tutuluyor. Hedef: Konu/marka tonu ve platforma göre (X/LinkedIn vb.) kısa gönderi metinleri üreten; üretilen içeriği Google Sheet’te tarih/saat sütunlarıyla planlayan; isteğe bağlı hatırlatıcı veya takvim entegrasyonu sunan no-code akış. Otomatik API ile yayın stretch; MVP’de üretim + plan tablosu yeterli.",
+      "deadline_hours": 72,
+      "checklist": [
+        "Girdi: Sheet veya form ile konu listesi, ton, hedef platform (sütunlar dokümante)",
+        "LLM: platforma uygun uzunluk ve hashtag/mention kuralları; marka güvenliği için ‘yasaklı ifade’ notu",
+        "Çıktı: gönderi metni + önerilen yayın tarihi/saati (timezone README’de)",
+        "Google Sheet: plan görünümü (durum: taslak/onaylandı); yeni satır veya güncelleme",
+        "İsteğe bağlı: Google Calendar hatırlatıcı veya e-posta özeti",
+        "Toplu üretim: döngü veya batch; API kota kontrolü",
+        "Workflow export + örnek Sheet şablonu",
+        "Test: en az 3 gönderi satırı üretilmiş örnek"
+      ],
+      "meta": {
+        "product_focus": "ai_social_media_planner",
+        "stack_examples": ["n8n", "google_sheets", "openai", "google_calendar"],
+        "non_goals_mvp": ["meta_x_api_otomatik_yayin_zorunlu"]
+      }
+    }
+  ]
+}
