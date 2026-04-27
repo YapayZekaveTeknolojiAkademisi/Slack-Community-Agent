@@ -1,9 +1,10 @@
 import os
 from abc import ABC, abstractmethod
-from groq import Groq
-from dotenv import load_dotenv
-
-load_dotenv()
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
 
 
 class BaseLLMClient(ABC):
@@ -37,6 +38,8 @@ class GroqLLMClient(BaseLLMClient):
         temperature: float = 0.7,
         system_message: str = "You are a helpful English teacher."
     ):
+        from groq import Groq 
+
         api_key = os.getenv("GROQ_API_KEY")
         if not api_key:
             raise ValueError("GROQ_API_KEY is missing in environment variables.")

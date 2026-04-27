@@ -1,8 +1,23 @@
-from packages.slack.client import slack_client
-from services.english_service.manager import EnglishService
+import logging
 import re
 
+from packages.slack.client import slack_client
+from services.english_service.manager import EnglishService
+
+logger = logging.getLogger(__name__)
+
 english_service = EnglishService()
+
+
+def handle_service_error(response, client, channel_id):
+    if "error" not in response:
+        return False
+
+    client.chat_postMessage(
+        channel=channel_id,
+        text=response["error"]
+    )
+    return True
 
 
 def setup_english_handlers():
@@ -51,10 +66,20 @@ def setup_english_handlers():
                 }
             ]
         )
+
     @app.message(re.compile(".*"))
     def handle_writing_submission(message, say):
+        if message.get("subtype") == "bot_message":
+            return
+
+        if "user" not in message:
+            return
+
         user_id = message["user"]
         text = message.get("text", "").strip()
+
+        if not text:
+            return
 
         session = english_service.session_manager.get(user_id)
         if not session:
@@ -63,10 +88,17 @@ def setup_english_handlers():
         if session.step != "waiting_writing":
             return
 
-        print("MESSAGE HANDLER CALLED")
-        print("user:", message.get("user"))
-        print("text:", message.get("text"))
+        logger.debug(
+            "English writing submission received. user=%s text_length=%s",
+            message.get("user"),
+            len(text),
+        )
+
         response = english_service.submit_writing(user_id, text)
+        if "error" in response:
+            say(response["error"])
+            return
+
         say(response["message"])
 
     @app.action(re.compile("^english_select_level_"))
@@ -78,6 +110,8 @@ def setup_english_handlers():
         selected_level = body["actions"][0]["value"]
 
         response = english_service.select_level(user_id, selected_level)
+        if handle_service_error(response, client, channel_id):
+            return
 
         client.chat_postMessage(
             channel=channel_id,
@@ -119,8 +153,9 @@ def setup_english_handlers():
         selected_mode = body["actions"][0]["value"]
 
         response = english_service.select_mode(user_id, selected_mode)
+        if handle_service_error(response, client, channel_id):
+            return
 
-        # Writing mode önce subtype seçtirecek
         if response["type"] == "writing_type_selection":
             client.chat_postMessage(
                 channel=channel_id,
@@ -154,7 +189,6 @@ def setup_english_handlers():
             )
             return
 
-        # Quiz mode doğrudan ilk soruyu döndürüyor
         if response["type"] == "quiz_question":
             client.chat_postMessage(
                 channel=channel_id,
@@ -177,6 +211,8 @@ def setup_english_handlers():
         writing_type = body["actions"][0]["value"]
 
         response = english_service.select_writing_type(user_id, writing_type)
+        if handle_service_error(response, client, channel_id):
+            return
 
         client.chat_postMessage(
             channel=channel_id,
@@ -192,6 +228,8 @@ def setup_english_handlers():
         selected_answer = body["actions"][0]["value"]
 
         response = english_service.submit_quiz_answer(user_id, selected_answer)
+        if handle_service_error(response, client, channel_id):
+            return
 
         client.chat_postMessage(
             channel=channel_id,
