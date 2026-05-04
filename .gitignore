@@ -228,4 +228,6 @@ Thumbs.db
 
 # Yerel anahtar / sertifika (yanlışlıkla commit’i önle)
 *.pem
-*.key
+*.key.pytest_cache/
+__pycache__/
+*.pyc
