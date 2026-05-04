@@ -21,6 +21,22 @@ app: App = slack_client.app
 settings = get_settings()
 
 
+def _allowed_event_slash_channels() -> frozenset[str]:
+    """
+    `/event` slash komutunun çalışabileceği kanallar.
+
+    ``SLACK_ANNOUNCEMENT_CHANNEL`` doluysa *yalnızca* bu kanal (create/cancel dahil tüm alt komutlar).
+    Boşsa geriye dönük olarak yalnızca ``EVENT_CHANNEL`` kullanılır.
+
+    Not: ``SLACK_COMMAND_CHANNELS`` challenge vb. içindir; etkinlik komutu burada kullanılmaz.
+    """
+    s = get_settings()
+    ann = (s.slack_announcement_channel or "").strip()
+    if ann:
+        return frozenset({ann})
+    return frozenset({s.event_channel})
+
+
 def _run_async(coro, timeout=30.0):
     """Bolt handler thread'inden async kodu calistirmak icin."""
     from services.event_service.core.event_loop import run_async
@@ -40,12 +56,14 @@ def handle_event_command(ack: Ack, body: dict, client, command):
     args = body.get("text", "").strip().split()
     cmd = args[0].lower() if args else "help"
 
-    # Kanal kontrolu — sadece event_channel'da calisir
-    if channel_id != settings.event_channel:
-        client.chat_postMessage(
-            channel=user_id,
-            text=f"Bu komut sadece <#{settings.event_channel}> kanalında kullanılabilir."
-        )
+    allowed = _allowed_event_slash_channels()
+    if channel_id not in allowed:
+        ch_hints = " · ".join(f"<#{c}>" for c in sorted(allowed))
+        hint = f"Bu komut yalnızca etkinlik duyuru kanalında kullanılabilir: {ch_hints}"
+        try:
+            client.chat_postEphemeral(channel=channel_id, user=user_id, text=hint)
+        except Exception:
+            client.chat_postMessage(channel=user_id, text=hint)
         return
 
     if cmd == "create":

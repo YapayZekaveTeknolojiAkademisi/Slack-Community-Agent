@@ -19,11 +19,6 @@ class SystemSettings(BaseSettings):
         validation_alias=AliasChoices("SLACK_WORKSPACE_OWNER_ID", "slack_workspace_owner_id"),
         description="Workspace owner Slack user ID (opsiyonel)",
     )
-    slack_admin_slack_id_csv: str = Field(
-        "",
-        validation_alias=AliasChoices("SLACK_ADMIN_SLACK_ID", "slack_admin_slack_id_csv"),
-        description="Admin(ler) Slack user ID — virgülle ayrılmış veya tek ID; ilk ID slack_admin_slack_id olarak kullanılır",
-    )
     slack_challenge_channel: str = Field(
         ...,
         validation_alias=AliasChoices("SLACK_CHALLENGE_CHANNEL", "slack_challenge_channel"),
@@ -34,10 +29,21 @@ class SystemSettings(BaseSettings):
         validation_alias=AliasChoices("SLACK_ADMIN_CHANNEL", "slack_admin_channel"),
         description="Admin bildirim kanalı (C...)",
     )
-    slack_admins_raw: str = Field(
+    slack_announcement_channel: Optional[str] = Field(
+        None,
+        validation_alias=AliasChoices(
+            "SLACK_ANNOUNCEMENT_CHANNEL", "slack_announcement_channel"
+        ),
+        description="Tüm etkinlik duyuruları bu kanala (C...); boşsa EVENT_CHANNEL + lokasyon kanalı",
+    )
+    slack_admins_csv: str = Field(
         "",
-        validation_alias=AliasChoices("SLACK_ADMINS", "slack_admins_raw"),
-        description="Virgülle ayrılmış admin Slack user ID (opsiyonel)",
+        validation_alias=AliasChoices(
+            "SLACK_ADMINS",
+            "SLACK_ADMIN_SLACK_ID",
+            "slack_admins_csv",
+        ),
+        description="Virgülle ayrılmış admin Slack user ID (ilk ID tek kullanıcı bekleyen çağrılarda slack_admin_slack_id)",
     )
     slack_command_channels_raw: str = Field(
         "",
@@ -76,6 +82,11 @@ class SystemSettings(BaseSettings):
 
     # Groq API
     groq_api_key: Optional[str] = Field(None, description="Groq Cloud API anahtarı")
+    groq_model: Optional[str] = Field(
+        None,
+        validation_alias=AliasChoices("GROQ_MODEL", "groq_model"),
+        description="Groq chat modeli (bos birakilirsa servis varsayilanlari)",
+    )
 
     # Gemini API
     gemini_api_key: Optional[str] = Field(None, description="Gemini API anahtarı")
@@ -333,13 +344,10 @@ class SystemSettings(BaseSettings):
     )
 
     def _parsed_slack_admins(self) -> list[str]:
-        raw = (self.slack_admins_raw or "").strip()
-        if raw:
-            return [x.strip() for x in raw.split(",") if x.strip()]
-        sid = (self.slack_admin_slack_id_csv or "").strip()
-        if sid:
-            return [x.strip() for x in sid.split(",") if x.strip()]
-        return []
+        raw = (self.slack_admins_csv or "").strip()
+        if not raw:
+            return []
+        return [x.strip() for x in raw.split(",") if x.strip()]
 
     @property
     def slack_admins(self) -> list[str]:
@@ -363,7 +371,7 @@ class SystemSettings(BaseSettings):
     @model_validator(mode="after")
     def _sync_slack_admin_fields(self) -> SystemSettings:
         if not self._parsed_slack_admins():
-            raise ValueError("SLACK_ADMINS veya SLACK_ADMIN_SLACK_ID tanımlanmalıdır.")
+            raise ValueError("SLACK_ADMINS tanımlanmalıdır (virgülle çoklu ID; SLACK_ADMIN_SLACK_ID eski alias).")
         return self
 
     @model_validator(mode="after")

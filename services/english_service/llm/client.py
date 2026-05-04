@@ -1,10 +1,6 @@
-import os
 from abc import ABC, abstractmethod
-try:
-    from dotenv import load_dotenv
-    load_dotenv()
-except ImportError:
-    pass
+
+from packages.settings import get_settings
 
 
 class BaseLLMClient(ABC):
@@ -38,14 +34,17 @@ class GroqLLMClient(BaseLLMClient):
         temperature: float = 0.7,
         system_message: str = "You are a helpful English teacher."
     ):
-        from groq import Groq 
+        from groq import Groq
 
-        api_key = os.getenv("GROQ_API_KEY")
+        settings = get_settings()
+        api_key = settings.groq_api_key
         if not api_key:
-            raise ValueError("GROQ_API_KEY is missing in environment variables.")
+            raise ValueError(
+                "groq_api_key tanimli degil (.env icinde GROQ_API_KEY / ayarlar)."
+            )
 
         self.client = Groq(api_key=api_key)
-        self.model = model or os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
+        self.model = model or settings.groq_model or "llama-3.3-70b-versatile"
         self.temperature = temperature
         self.system_message = system_message
 

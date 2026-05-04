@@ -30,7 +30,11 @@ class ChallengeType(Base, IDMixin, TimestampMixin):
     __tablename__ = "challenge_types"
     __prefix__ = "CHT"
 
-    category: Mapped[ChallengeCategory] = mapped_column(SAEnum(ChallengeCategory), nullable=False, index=True)
+    category: Mapped[ChallengeCategory] = mapped_column(
+        SAEnum(ChallengeCategory, values_callable=lambda x: [e.value for e in x]),
+        nullable=False,
+        index=True,
+    )
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     deadline_hours: Mapped[int | None] = mapped_column(Integer, nullable=True)
@@ -44,7 +48,11 @@ class Challenge(Base, IDMixin, TimestampMixin):
 
     challenge_type_id: Mapped[str | None] = mapped_column(String(60), ForeignKey("challenge_types.id"), nullable=True, index=True)
     creator_slack_id: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
-    status: Mapped[ChallengeStatus] = mapped_column(SAEnum(ChallengeStatus), nullable=False, index=True)
+    status: Mapped[ChallengeStatus] = mapped_column(
+        SAEnum(ChallengeStatus, values_callable=lambda x: [e.value for e in x]),
+        nullable=False,
+        index=True,
+    )
 
     challenge_channel_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
     challenge_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

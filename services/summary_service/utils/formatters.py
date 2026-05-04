@@ -6,10 +6,17 @@ Desteklenen formatlar:
 - Çoklu kanal özeti (/channel-summary all)
 - Kişisel ilgi alanları bölümü
 - Hata ve boş durum mesajları
+
+Slack sınırları: blok başına mrkdwn/plain_text ~3000 karakter; mesajda en fazla ~50 blok.
 """
 from __future__ import annotations
 
 from packages.slack.blocks.builder import MessageBuilder, BlockBuilder
+
+# Ephemeral çoklu kanal: blok sayısı + tek blok başına metin
+_MAX_CHANNELS_IN_EPHEMERAL = 14
+_PER_CHANNEL_SUMMARY_CHARS = 2999
+_MAX_SINGLE_SUMMARY_CHARS = 2999 * 12  # tek mesajda makul üst sınır (~12 plain section)
 
 
 def format_summary_blocks(
@@ -27,13 +34,19 @@ def format_summary_blocks(
     builder.add_header(f"📋 Son {hours} Saatlik {mode_label}")
     builder.add_text(f"Kanal: <#{channel_id}> • {message_count} mesaj işlendi")
     builder.add_divider()
-    builder.add_text(summary_text)
+    body = summary_text or ""
+    if len(body) > _MAX_SINGLE_SUMMARY_CHARS:
+        body = body[: _MAX_SINGLE_SUMMARY_CHARS - 1] + "…"
+    builder.add_plain_text(body)
 
     # Kişisel bölüm
     if personal_summary:
         builder.add_divider()
         builder.add_header("👤 Seni İlgilendiren Konular")
-        builder.add_text(personal_summary)
+        ps = personal_summary
+        if len(ps) > _MAX_SINGLE_SUMMARY_CHARS:
+            ps = ps[: _MAX_SINGLE_SUMMARY_CHARS - 1] + "…"
+        builder.add_plain_text(ps)
 
     builder.add_divider()
     builder.add_context([
@@ -57,26 +70,40 @@ def format_multi_channel_blocks(
     builder = MessageBuilder()
 
     mode_label = "Kısa" if mode == "brief" else "Detaylı"
-    active = len(channel_summaries)
+    total_active = len(channel_summaries)
+    omitted = max(0, total_active - _MAX_CHANNELS_IN_EPHEMERAL)
+    if omitted:
+        channel_summaries = channel_summaries[:_MAX_CHANNELS_IN_EPHEMERAL]
+
     builder.add_header(f"📋 Tüm Kanallar — Son {hours} Saat ({mode_label})")
-    builder.add_text(f"*{active} aktif kanal* özetlendi")
+    if omitted:
+        builder.add_text(
+            f"*{total_active} kanal* özetlendi — Slack blok limiti nedeniyle ilk "
+            f"*{len(channel_summaries)}* kanal gösteriliyor."
+        )
+    else:
+        builder.add_text(f"*{total_active} aktif kanal* özetlendi")
     builder.add_divider()
 
     for ch in channel_summaries:
-        builder.add_text(
-            f"*<#{ch['channel_id']}>*  •  {ch['count']} mesaj\n\n"
-            f"{ch['summary']}"
-        )
+        builder.add_text(f"*<#{ch['channel_id']}>*  •  {ch['count']} mesaj")
+        body = ch.get("summary") or ""
+        if len(body) > _PER_CHANNEL_SUMMARY_CHARS:
+            body = body[: _PER_CHANNEL_SUMMARY_CHARS - 1] + "…"
+        builder.add_plain_text(body)
         builder.add_divider()
 
     # Kişisel bölüm
     if personal_summary:
         builder.add_header("👤 Seni İlgilendiren Konular")
-        builder.add_text(personal_summary)
+        ps = personal_summary
+        if len(ps) > _PER_CHANNEL_SUMMARY_CHARS:
+            ps = ps[: _PER_CHANNEL_SUMMARY_CHARS - 1] + "…"
+        builder.add_plain_text(ps)
         builder.add_divider()
 
     builder.add_context([
-        f"🤖 Cemil tarafından oluşturuldu • Son {hours} saat • {active} kanal"
+        f"🤖 Cemil tarafından oluşturuldu • Son {hours} saat • {total_active} kanal"
     ])
 
     return builder.build()

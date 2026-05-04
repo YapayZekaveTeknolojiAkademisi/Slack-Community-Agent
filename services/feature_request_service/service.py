@@ -24,9 +24,20 @@ DÖNÜŞ TİPLERİ (submit_request)
   {"status": "quota_exceeded",  "used": 2, "max": 2}
 """
 
+from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+import logging
+import os
+import tempfile
 from typing import Any
+
+# Numba önce NUMBA_CACHE_DIR ile yazılabilir bir kök arar; yoksa site-packages/__pycache__
+# denenir (Docker'da genelde yazılamaz → "no locator available").
+os.environ.setdefault(
+    "NUMBA_CACHE_DIR",
+    os.path.join(tempfile.gettempdir(), "numba-cache"),
+)
 
 import hdbscan
 import numpy as np
@@ -70,6 +81,37 @@ class ClusteringParams:
 
 
 FIXED_CLUSTERING_PARAMS: ClusteringParams | None = None
+
+
+def _umap_params_for_sample_count(n_samples: int, params: ClusteringParams) -> tuple[int, int, dict]:
+    """
+    UMAP spektral başlatma scipy eigsh ile k < N ister; n_components ve n_neighbors üst sınırı taşarsa TypeError oluşur (az kayıt).
+    """
+    # Komşu sayısı en fazla n_samples - 1; en az 2 (UMAP dokümantasyonu ile uyumlu küçük alt sınır)
+    n_neighbors = max(2, min(params.n_neighbors, n_samples - 1))
+    # Gömü boyutu örnekten küçük olmalı; dar marj (n_samples - 1) ile kes
+    n_components = max(2, min(params.n_components, n_samples - 1))
+    extra: dict = {}
+    if n_samples < 15:
+        extra["init"] = "random"
+    return n_neighbors, n_components, extra
+
+
+_CLUSTER_ID_SAMPLE_LIMIT = 12
+"""clustering.log içinde küme başına en fazla kaç talep ID'si örneklenir."""
+
+
+def _clustering_trace(logger: logging.Logger, phase: str, **payload: Any) -> None:
+    """
+    ``logs/feature_request_service/clustering.log`` dosyasına tek satır JSON yazar
+    (ClusteringFormatter). Takip: phase + zaman damgası + payload.
+    """
+    data: dict[str, Any] = {
+        "phase": phase,
+        "at": datetime.now(timezone.utc).isoformat(),
+        **payload,
+    }
+    logger.info("[FR-clustering] %s", phase, extra={"clustering": data})
 
 
 class FeatureRequestService:
@@ -120,6 +162,13 @@ class FeatureRequestService:
             # 1. Haftalık hak kontrolü
             used = await self.check_weekly_quota(user_id, repo)
             if used >= cfg.feature_request_weekly_quota:
+                _clustering_trace(
+                    self.logger,
+                    "submit_quota_blocked",
+                    user_id=user_id,
+                    used_this_window=used,
+                    quota_max=cfg.feature_request_weekly_quota,
+                )
                 self.logger.info(
                     "Haftalık kota aşıldı.", extra={"user_id": user_id, "used": used}
                 )
@@ -132,6 +181,13 @@ class FeatureRequestService:
             # 2. Embed
             try:
                 vector = self.vector_client.embed(raw_text)
+                _clustering_trace(
+                    self.logger,
+                    "submit_embed_ok",
+                    user_id=user_id,
+                    embedding_dims=list(vector.shape) if hasattr(vector, "shape") else None,
+                    text_chars=len(raw_text or ""),
+                )
             except Exception as exc:
                 self.logger.error(f"Embed hatası: {exc}", exc_info=True)
                 # Embedding başarısız olsa dahi kaydı `embedding_failed` statusuyla ekle
@@ -150,6 +206,14 @@ class FeatureRequestService:
             )
             if similar_record is not None:
                 if similarity_score >= cfg.feature_request_similarity_exact:
+                    _clustering_trace(
+                        self.logger,
+                        "submit_similarity_exact_match",
+                        user_id=user_id,
+                        matched_request_id=similar_record.id,
+                        cosine_similarity=round(float(similarity_score), 6),
+                        threshold_exact=cfg.feature_request_similarity_exact,
+                    )
                     self.logger.info(
                         "Birebir aynı (exact match) kayıt bulundu.",
                         extra={
@@ -164,6 +228,15 @@ class FeatureRequestService:
                         "existing_text": similar_record.request_raw,
                     }
                 elif similarity_score >= cfg.feature_request_similarity_warning:
+                    _clustering_trace(
+                        self.logger,
+                        "submit_similarity_warning_zone",
+                        user_id=user_id,
+                        matched_request_id=similar_record.id,
+                        cosine_similarity=round(float(similarity_score), 6),
+                        threshold_warning=cfg.feature_request_similarity_warning,
+                        threshold_exact=cfg.feature_request_similarity_exact,
+                    )
                     self.logger.info(
                         "Benzer kayıt bulundu (gri alan).",
                         extra={
@@ -189,6 +262,15 @@ class FeatureRequestService:
                     session.add(pending_request)
                     await session.flush()
 
+                    _clustering_trace(
+                        self.logger,
+                        "submit_created_pending_bypass",
+                        user_id=user_id,
+                        pending_id=pending_request.id,
+                        similar_to=similar_record.id,
+                        fraud_score=fraud_score,
+                    )
+
                     return {
                         "status": "similar_found",
                         "existing_id": similar_record.id,
@@ -210,6 +292,14 @@ class FeatureRequestService:
             session.add(new_request)
             await session.flush()
 
+            _clustering_trace(
+                self.logger,
+                "submit_created_embedded",
+                user_id=user_id,
+                request_id=new_request.id,
+                fraud_score=fraud_score,
+                note="Kayıt embedded; kümeleme pipeline bu talebi bekleyecek.",
+            )
             self.logger.info(
                 "Yeni feature request kaydedildi.",
                 extra={"user_id": user_id, "request_id": new_request.id},
@@ -354,13 +444,27 @@ class FeatureRequestService:
                     session
                 ).list_embedded_vectors(user_id)
 
+        cfg = get_settings()
+        _clustering_trace(
+            self.logger,
+            "similarity_week_scan_start",
+            user_id=user_id,
+            candidate_embedded_records=len(existing),
+            thresholds={
+                "similarity_exact": cfg.feature_request_similarity_exact,
+                "similarity_warning": cfg.feature_request_similarity_warning,
+            },
+        )
+
         max_similarity = 0.0
         most_similar_record = None
+        compared = 0
 
         for record in existing:
             if record.request_embedded is None:
                 continue
             try:
+                compared += 1
                 existing_vec = np.array(record.request_embedded, dtype=np.float32)
                 similarity = self.vector_client.cosine_similarity(
                     new_vector, existing_vec
@@ -383,6 +487,22 @@ class FeatureRequestService:
                     "existing_id": most_similar_record.id,
                     "score": max_similarity,
                 },
+            )
+            _clustering_trace(
+                self.logger,
+                "similarity_week_best",
+                user_id=user_id,
+                compared_pairs=compared,
+                best_match_request_id=most_similar_record.id,
+                max_cosine_similarity=round(float(max_similarity), 6),
+            )
+        else:
+            _clustering_trace(
+                self.logger,
+                "similarity_week_no_vectors",
+                user_id=user_id,
+                compared_pairs=compared,
+                note="Karşılaştırılabilir gömülü kayıt yok veya hepsi atlandı.",
             )
 
         return most_similar_record, float(max_similarity)
@@ -420,20 +540,55 @@ class FeatureRequestService:
                 ).list_embedded_others_since(user_id, since)
 
         if not others:
+            _clustering_trace(
+                self.logger,
+                "fraud_scan_skipped",
+                user_id=user_id,
+                reason="rolling_pencerede_baska_kullanici_embedded_yok",
+                rolling_days=days,
+            )
             return 0.0
 
         similar_count = 0
         fraud_thresh = cfg.feature_request_fraud_threshold
+        hits: list[dict[str, Any]] = []
+
+        _clustering_trace(
+            self.logger,
+            "fraud_scan_start",
+            user_id=user_id,
+            pool_other_users_records=len(others),
+            fraud_similarity_threshold=fraud_thresh,
+            window_since_utc=since.isoformat(),
+        )
+
         for record in others:
             try:
                 other_vec = np.array(record.request_embedded, dtype=np.float32)
                 similarity = self.vector_client.cosine_similarity(new_vector, other_vec)
                 if similarity >= fraud_thresh:
                     similar_count += 1
+                    hits.append(
+                        {
+                            "request_id": record.id,
+                            "other_user_id": record.user_id,
+                            "cosine": round(float(similarity), 6),
+                        }
+                    )
             except Exception:
                 continue
 
         score = similar_count / len(others)
+        _clustering_trace(
+            self.logger,
+            "fraud_scan_done",
+            user_id=user_id,
+            compared=len(others),
+            matches_above_threshold=similar_count,
+            fraud_ratio=round(score, 6),
+            threshold=fraud_thresh,
+            sample_hits=hits[:15],
+        )
         if score > 0:
             self.logger.warning(
                 f"Fraud tespit edildi (score={score:.3f}).",
@@ -471,6 +626,12 @@ class FeatureRequestService:
 
             embedded = await fr_repo.list_by_status("embedded")
             if not embedded:
+                _clustering_trace(
+                    self.logger,
+                    "pipeline_abort",
+                    reason="no_embedded_rows",
+                    is_preview=is_preview,
+                )
                 self.logger.info("Kümelenecek kayıt yok.")
                 return {
                     "clustered": 0,
@@ -496,7 +657,26 @@ class FeatureRequestService:
                         extra={"record_id": record.id},
                     )
 
+            skipped_embed = len(embedded) - len(vectors)
+            _clustering_trace(
+                self.logger,
+                "pipeline_vectors_ready",
+                is_preview=is_preview,
+                embedded_rows=len(embedded),
+                valid_vectors=len(vectors),
+                skipped_invalid_blob=skipped_embed,
+                sample_request_ids=valid_ids[:20],
+            )
+
             if len(vectors) < 3:
+                _clustering_trace(
+                    self.logger,
+                    "pipeline_abort",
+                    reason="below_min_samples",
+                    min_required=3,
+                    valid_vectors=len(vectors),
+                    request_ids=valid_ids,
+                )
                 self.logger.info(
                     f"Kümeleme için yeterli kayıt yok (mevcut={len(vectors)}, min=3)."
                 )
@@ -519,19 +699,61 @@ class FeatureRequestService:
                 len(vectors)
             )
 
+            _clustering_trace(
+                self.logger,
+                "pipeline_params",
+                is_preview=is_preview,
+                source="fixed" if FIXED_CLUSTERING_PARAMS else "dynamic_from_batch",
+                hdbscan_min_cluster_size=params.min_cluster_size,
+                hdbscan_min_samples=params.min_samples,
+                umap_n_components_requested=params.n_components,
+                umap_n_neighbors_requested=params.n_neighbors,
+                batch_size=len(vectors),
+            )
+
             # --- UMAP boyut indirgeme ---
+            n_samples = len(vectors)
+            n_neighbors_umap, n_components_umap, umap_extra = _umap_params_for_sample_count(
+                n_samples, params
+            )
+            _clustering_trace(
+                self.logger,
+                "pipeline_umap_start",
+                matrix_shape=list(matrix.shape),
+                n_samples=n_samples,
+                effective_n_neighbors=n_neighbors_umap,
+                effective_n_components=n_components_umap,
+                init=str(umap_extra.get("init", "spectral_default")),
+            )
             self.logger.info(
-                f"UMAP çalışıyor: {matrix.shape} → ({len(vectors)}, {params.n_components})"
+                "UMAP çalışıyor: %s → (%s, %s) n_neighbors=%s init=%s",
+                matrix.shape,
+                n_samples,
+                n_components_umap,
+                n_neighbors_umap,
+                umap_extra.get("init", "default"),
             )
             try:
                 reducer = umap.UMAP(
-                    n_components=params.n_components,
+                    n_components=n_components_umap,
                     metric="cosine",
-                    n_neighbors=min(params.n_neighbors, len(vectors) - 1),
+                    n_neighbors=n_neighbors_umap,
                     random_state=42,
+                    **umap_extra,
                 )
                 reduced = reducer.fit_transform(matrix)
+                _clustering_trace(
+                    self.logger,
+                    "pipeline_umap_done",
+                    reduced_shape=list(reduced.shape),
+                )
             except Exception as exc:
+                _clustering_trace(
+                    self.logger,
+                    "pipeline_umap_failed",
+                    error=str(exc),
+                    request_ids_affected=valid_ids,
+                )
                 self.logger.error(f"UMAP hatası: {exc}", exc_info=True)
                 if not is_preview:
                     for req_id in valid_ids:
@@ -548,6 +770,13 @@ class FeatureRequestService:
                 }
 
             # --- HDBSCAN kümeleme ---
+            _clustering_trace(
+                self.logger,
+                "pipeline_hdbscan_start",
+                min_cluster_size=params.min_cluster_size,
+                min_samples=params.min_samples,
+                metric="euclidean_on_umap_space",
+            )
             self.logger.info("HDBSCAN kümeleme başlatılıyor...")
             try:
                 clusterer = hdbscan.HDBSCAN(
@@ -557,7 +786,24 @@ class FeatureRequestService:
                     prediction_data=True,
                 )
                 labels = clusterer.fit_predict(reduced)  # -1 = noise
+                uniq, counts = np.unique(labels, return_counts=True)
+                label_dist = {
+                    int(k): int(v)
+                    for k, v in zip(uniq.tolist(), counts.tolist())
+                }
+                _clustering_trace(
+                    self.logger,
+                    "pipeline_hdbscan_done",
+                    label_distribution=label_dist,
+                    noise_points=int(label_dist.get(-1, 0)),
+                    distinct_clusters=len([k for k in label_dist if k != -1]),
+                )
             except Exception as exc:
+                _clustering_trace(
+                    self.logger,
+                    "pipeline_hdbscan_failed",
+                    error=str(exc),
+                )
                 self.logger.error(f"HDBSCAN hatası: {exc}", exc_info=True)
                 return {
                     "clustered": 0,
@@ -591,15 +837,47 @@ class FeatureRequestService:
                     preview_records.append(req_obj)
                 clustered_count += 1
 
+            noise_ids_sample = [
+                valid_ids[i]
+                for i, lb in enumerate(labels)
+                if lb == -1
+            ][:25]
+            member_map: defaultdict[int, list[str]] = defaultdict(list)
+            for rid, lb in zip(valid_ids, labels):
+                if lb != -1:
+                    member_map[int(lb)].append(rid)
+            membership_summary = {
+                str(cid): {
+                    "count": len(ids),
+                    "sample_request_ids": ids[:_CLUSTER_ID_SAMPLE_LIMIT],
+                }
+                for cid, ids in sorted(member_map.items())
+            }
+            _clustering_trace(
+                self.logger,
+                "pipeline_assignments",
+                is_preview=is_preview,
+                clustered_assigned=clustered_count,
+                noise_unassigned=noise_count,
+                noise_sample_request_ids=noise_ids_sample,
+                cluster_membership_summary=membership_summary,
+                note="noise=-1 HDBSCAN gürültü; cluster_id DB/planda atanır.",
+            )
+
             # --- Yeni cluster'lar için Groq label üret ---
             unique_clusters = set(int(lbl) for lbl in labels if lbl != -1)
             new_labels_count = 0
+            groq_labels_detail: dict[str, Any] = {}
 
             for cid in unique_clusters:
                 existing_label = await fcl_repo.get_by_cluster_id(cid)
 
                 # Preview modundaysa ve label zaten var ise (büyük olasılıkla olmaz çünkü resetleniyor) sadece alıp preview'a at
                 if existing_label is not None:
+                    groq_labels_detail[str(cid)] = {
+                        "source": "existing_db",
+                        "label": existing_label.label,
+                    }
                     if is_preview:
                         preview_labels[cid] = existing_label.label
                     continue  # Daha önce üretilmiş, tekrar üretme
@@ -614,6 +892,13 @@ class FeatureRequestService:
 
                 label_text = await self._generate_cluster_label(cid, sample_texts)
 
+                groq_labels_detail[str(cid)] = {
+                    "source": "groq_generated",
+                    "label": (label_text or "")[:400],
+                    "sample_request_ids": sample_valid_ids,
+                    "sample_text_chars": [len(t or "") for t in sample_texts],
+                }
+
                 if not is_preview:
                     new_label = FeatureClusterLabel(
                         cluster_id=cid,
@@ -627,6 +912,13 @@ class FeatureRequestService:
                     preview_labels[cid] = label_text
 
                 new_labels_count += 1
+
+            _clustering_trace(
+                self.logger,
+                "pipeline_groq_labels",
+                is_preview=is_preview,
+                clusters=groq_labels_detail,
+            )
 
             self.logger.info(
                 "Clustering pipeline tamamlandı.",
@@ -654,17 +946,25 @@ class FeatureRequestService:
             )
 
             clustering_log = {
-                "run_date": datetime.now().isoformat(),
+                "phase": "clustering_run_summary",
+                "run_date": datetime.now(timezone.utc).isoformat(),
+                "is_preview": is_preview,
                 "n_sentences": len(vectors),
                 "min_cluster_size": params.min_cluster_size,
                 "min_samples": params.min_samples,
-                "n_components": params.n_components,
-                "n_neighbors": params.n_neighbors,
+                "n_components_requested": params.n_components,
+                "n_neighbors_requested": params.n_neighbors,
+                "umap_effective_n_components": n_components_umap,
+                "umap_effective_n_neighbors": n_neighbors_umap,
+                "umap_init": str(umap_extra.get("init", "default")),
                 "n_clusters_found": len(unique_cluster_list),
                 "noise_ratio": round(noise_count / len(vectors), 4) if vectors else 0.0,
                 "silhouette_score": sil_score,
                 "cluster_sizes": cluster_sizes,
                 "param_source": "fixed" if FIXED_CLUSTERING_PARAMS else "dynamic",
+                "cluster_membership_summary": membership_summary,
+                "noise_sample_request_ids": noise_ids_sample,
+                "groq_labels_by_cluster": groq_labels_detail,
             }
             self.logger.info(
                 "clustering_run",

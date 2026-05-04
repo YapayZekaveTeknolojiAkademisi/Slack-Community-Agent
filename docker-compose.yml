@@ -1,12 +1,15 @@
 # Slack Community Agent — yerel / sunucu orkestasyonu
 #
 # Önkoşul: proje kökünde Slack + Postgres dahil tam `.env` (bkz. `.env.template`).
-# Compose, konteyner içinde `POSTGRES_HOST=postgres` ile `.env` içindeki host’u ezer.
+# Konteynerler `x-db-env` ile postgres servisine baglanir (sifre: .env veya varsayilan `postgres`).
 #
 # Varsayılan: postgres + migrate + challenge (Socket) + event (scheduler, --socket yok).
 # Aynı Slack app token ile ikinci bir Socket Mode süreci çalıştırmayın.
 #
 # Sadece özellik talebi süreci (challenge yok): docker compose --profile feature-standalone up -d
+# English / Summary (ayri Socket — challenge ile birlikte calistirmayin):
+#   docker compose --profile english-standalone up -d
+#   docker compose --profile summary-standalone up -d
 #
 # Komutlar:
 #   docker compose up -d
@@ -14,6 +17,13 @@
 #   docker compose down
 
 name: slack-community-agent
+
+x-db-env: &db-env
+  POSTGRES_HOST: postgres
+  POSTGRES_PORT: "5432"
+  POSTGRES_USER: ${POSTGRES_USER:-postgres}
+  POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+  POSTGRES_DB: ${POSTGRES_DB:-slack_community_agent}
 
 services:
   postgres:
@@ -23,6 +33,9 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
       POSTGRES_DB: ${POSTGRES_DB:-slack_community_agent}
+    ports:
+      # Yerel araçlar (IDE, pgAdmin, alembic host’tan): localhost:5432. Makinede başka Postgres varsa çakışır → "5433:5432" yapın.
+      - "${POSTGRES_PUBLISH_PORT:-5432}:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -43,8 +56,7 @@ services:
     env_file:
       - .env
     environment:
-      POSTGRES_HOST: postgres
-      POSTGRES_PORT: "5432"
+      <<: *db-env
     working_dir: /app
     command: ["alembic", "upgrade", "head"]
     restart: "no"
@@ -59,9 +71,11 @@ services:
     env_file:
       - .env
     environment:
-      POSTGRES_HOST: postgres
-      POSTGRES_PORT: "5432"
+      <<: *db-env
+      NUMBA_CACHE_DIR: /tmp/numba-cache
     volumes:
+      # Host projedeki logs/ ile senkron — dosya handler'ları /app/logs/<servis>/ yazar
+      - ./logs:/app/logs
       - hf_cache:/home/appuser/.cache/huggingface
     depends_on:
       postgres:
@@ -77,11 +91,12 @@ services:
     env_file:
       - .env
     environment:
-      POSTGRES_HOST: postgres
-      POSTGRES_PORT: "5432"
+      <<: *db-env
     # Dockerfile --socket verir; challenge zaten Socket tuttugu icin burada sadece scheduler (+ envanter handler kaydi).
     command: ["python", "-m", "services.event_service"]
     volumes:
+      # Host projedeki logs/ ile senkron — dosya handler'ları /app/logs/<servis>/ yazar
+      - ./logs:/app/logs
       - hf_cache:/home/appuser/.cache/huggingface
     depends_on:
       postgres:
@@ -99,10 +114,48 @@ services:
     env_file:
       - .env
     environment:
-      POSTGRES_HOST: postgres
-      POSTGRES_PORT: "5432"
+      <<: *db-env
+      NUMBA_CACHE_DIR: /tmp/numba-cache
     volumes:
+      # Host projedeki logs/ ile senkron — dosya handler'ları /app/logs/<servis>/ yazar
+      - ./logs:/app/logs
       - hf_cache:/home/appuser/.cache/huggingface
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  english:
+    profiles: ["english-standalone"]
+    build:
+      context: .
+      dockerfile: services/english_service/Dockerfile
+    env_file:
+      - .env
+    environment:
+      <<: *db-env
+    volumes:
+      - ./logs:/app/logs
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  summary:
+    profiles: ["summary-standalone"]
+    build:
+      context: .
+      dockerfile: services/summary_service/Dockerfile
+    env_file:
+      - .env
+    environment:
+      <<: *db-env
+    volumes:
+      - ./logs:/app/logs
     depends_on:
       postgres:
         condition: service_healthy

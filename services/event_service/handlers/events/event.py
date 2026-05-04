@@ -16,11 +16,14 @@ from packages.settings import get_settings
 from packages.slack.client import slack_client
 from ...logger import _logger
 from ...utils.notifications import (
-    post_admin_request, post_announcement, post_update_announcement, send_dm,
+    _location_display,
+    post_admin_request,
+    post_announcement,
+    post_update_announcement,
+    send_dm,
+    update_admin_request_message,
 )
 from ...utils.email import send_admin_notification, send_user_status_email
-from ...utils.calendar import build_google_calendar_url
-from ...utils.notifications import _location_display
 from packages.slack.blocks.builder import MessageBuilder
 
 app: App = slack_client.app
@@ -105,16 +108,31 @@ def handle_create_modal(ack: Ack, body: dict, client, view):
         _logger.error("[EVT] Create failed: %s", e)
         return
 
-    post_admin_request(event)
+    admin_ref = post_admin_request(event)
+    if admin_ref:
+        ad_ch, ad_ts = admin_ref
+
+        async def _persist_admin_slack():
+            async with db.session() as session:
+                ent = await session.get(Event, event.id)
+                if ent:
+                    meta = dict(ent.meta or {})
+                    meta["admin_slack_channel"] = ad_ch
+                    meta["admin_slack_ts"] = ad_ts
+                    ent.meta = meta
+
+        _run_async(_persist_admin_slack())
     send_admin_notification(event)
 
     loc = _location_display(event)
     confirm_text = (
-        f"Etkinlik talebiniz başarıyla iletildi!\n\n"
+        "*Talebiniz alındı*\n\n"
         f"*{event.name}*\n"
         f"{event.date.strftime('%d %B %Y')} · {event.time.strftime('%H:%M')} · {loc}\n\n"
-        f"Admin onayını bekliyor. Sonuç Slack DM ve e-posta ile bildirilecek.\n"
-        f"_Talep ID: {event.id}_"
+        "Formda gönderdiğiniz etkinlik kaydı yöneticilere iletildi. "
+        "Onay veya ret kararı buradan (Slack DM) size bildirilecek; "
+        "hesabınızda e-posta tanımlıysa özet oraya da gidebilir.\n\n"
+        f"_Talep: `{event.id}`_"
     )
     send_dm(user_id, confirm_text)
 
@@ -386,24 +404,37 @@ def handle_admin_approve(ack: Ack, body: dict, client, view):
             if note:
                 evt.admin_note = note
             await session.flush()
+            await session.refresh(evt)
             return evt
 
     evt = _run_async(_approve())
     if not evt:
         return
 
-    note_text = f"\n*Admin Notu:* {note}" if note else ""
+    note_text = f"\n\n*Yönetici notu:* {note}" if note else ""
     loc = _location_display(evt)
+    ann_ch = (settings.slack_announcement_channel or "").strip()
+    if ann_ch:
+        duyuru_line = (
+            f"Herkese açık etkinlik duyurusu *yalnızca* duyuru kanalına gönderildi: <#{ann_ch}>\n"
+            f"_Talep: `{evt.id}`_"
+        )
+    else:
+        duyuru_line = (
+            "Etkinlik duyurusu ilgili Slack kanallarına gönderildi "
+            "(`.env` içinde `SLACK_ANNOUNCEMENT_CHANNEL` boş olduğu için varsayılan kanallar kullanıldı).\n"
+            f"_Talep: `{evt.id}`_"
+        )
     send_dm(
         evt.creator_slack_id,
-        f"Etkinliğiniz Onaylandı!\n\n"
+        f"*Etkinliğiniz onaylandı*{note_text}\n\n"
         f"*{evt.name}*\n"
-        f"{evt.date.strftime('%d %B %Y')} · {evt.time.strftime('%H:%M')} · {loc}"
-        f"{note_text}\n\n"
-        f"Duyuru #serbest-kürsü kanalına gönderildi.\n_{evt.id}_"
+        f"{evt.date.strftime('%d %B %Y')} · {evt.time.strftime('%H:%M')} · {loc}\n\n"
+        f"{duyuru_line}",
     )
 
     send_user_status_email(evt.creator_slack_id, evt, "approved", note)
+    update_admin_request_message(evt, outcome="approved", admin_id=admin_id, note=note)
     post_announcement(evt)
 
     _logger.info("[EVT] Event approved: %s by admin %s", event_id, admin_id)
@@ -426,23 +457,26 @@ def handle_admin_reject(ack: Ack, body: dict, client, view):
             if note:
                 evt.admin_note = note
             await session.flush()
+            await session.refresh(evt)
             return evt
 
     evt = _run_async(_reject())
     if not evt:
         return
 
-    note_text = f"\n*Admin Notu:* {note}" if note else ""
+    note_text = f"\n\n*Yönetici notu:* {note}" if note else ""
     send_dm(
         evt.creator_slack_id,
-        f"Etkinliğiniz Reddedildi\n\n"
+        f"*Etkinlik talebiniz reddedildi*{note_text}\n\n"
         f"*{evt.name}*\n"
-        f"{evt.date.strftime('%d %B %Y')} · {evt.time.strftime('%H:%M')}"
-        f"{note_text}\n\n"
-        f"Yeni bir etkinlik talebi için `/event create` komutunu kullanabilirsiniz.\n_{evt.id}_"
+        f"{evt.date.strftime('%d %B %Y')} · {evt.time.strftime('%H:%M')}\n\n"
+        "Herkese duyuru yapılmadı. Yeni talep için `/event create` kullanabilirsiniz.\n"
+        f"_Talep: `{evt.id}`_",
     )
 
     send_user_status_email(evt.creator_slack_id, evt, "rejected", note)
+
+    update_admin_request_message(evt, outcome="rejected", admin_id=admin_id, note=note)
 
     _logger.info("[EVT] Event rejected: %s by admin %s", event_id, admin_id)
 

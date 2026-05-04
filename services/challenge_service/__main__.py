@@ -4,7 +4,7 @@ Challenge Service — Entry Point
 Başlatma sırası:
   1. Logger
   2. DB bağlantısı
-  3. Bolt handler'ları kayıt et
+  3. Bolt handler'ları kayıt et (challenge, feature_request, event, english, summary)
   4. Background event loop aç + set_loop()
   5. service_manager.start() (DB temizliği, registry, monitörler)
   6. Slack Socket Mode başlat (blocking)
@@ -21,10 +21,20 @@ import threading
 from services.challenge_service.logger import _logger  # noqa: F401 — start_logging (önce)
 from packages.database.manager import db
 from packages.slack.client import slack_client
+
+# /channel-summary — challenge ile tek Socket; doğrudan yükle (Bolt kaydı garanti).
+import services.summary_service.handlers.commands.summary  # noqa: F401
+
 from services.challenge_service import handlers as _handlers  # noqa: F401 — handler kayıtları aktive edilir
 from services.feature_request_service import handlers as _fr_handlers  # noqa: F401 — feature_request handler'ları shared socket mode'a kaydedilir
+from services.event_service import handlers as _evt_handlers  # noqa: F401 — /event Slack komutu (tek Socket; event_service süreci socket kullanmaz)
 from services.challenge_service.core.event_loop import set_loop
+from services.event_service.core.event_loop import set_loop as set_event_service_loop
+from services.feature_request_service.core.event_loop import set_loop as set_feature_request_loop
+from services.english_service.handlers import setup_english_handlers
 from services.challenge_service.manager import StartupMode, service_manager
+
+setup_english_handlers()
 
 
 # ---------------------------------------------------------------------------
@@ -103,6 +113,8 @@ def main(mode: StartupMode = StartupMode.RESUME) -> None:
     # 1. Background event loop'u oluştur ve ayrı thread'de başlat
     loop = asyncio.new_event_loop()
     set_loop(loop)
+    set_event_service_loop(loop)
+    set_feature_request_loop(loop)
 
     loop_thread = threading.Thread(target=_run_background_loop, args=(loop,), daemon=True, name="bg-event-loop")
     loop_thread.start()

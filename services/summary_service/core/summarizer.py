@@ -92,7 +92,11 @@ Bu mesajlar seni doğrudan ilgilendiriyor:
 
 # ── Model ayarları ───────────────────────────────────────────────
 
-_MODEL = "llama-3.1-8b-instant"
+
+def _groq_model_name() -> str:
+    return settings.groq_model or "llama-3.1-8b-instant"
+
+
 _TEMPERATURE = 0.3
 
 
@@ -100,7 +104,7 @@ def _call_llm(system_prompt: str, user_prompt: str, max_tokens: int = 1024) -> s
     client = _get_groq_client()
     try:
         resp = client.chat.completions.create(
-            model=_MODEL,
+            model=_groq_model_name(),
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
