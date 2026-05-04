@@ -1,0 +1,265 @@
+{
+  "table": "challenge_types",
+  "data": [
+    {
+      "category": "learn",
+      "name": "Flask + SQLite: Not Alma API",
+      "description": "Kullanıcıların not ekleyebildiği basit bir API geliştirin.",
+      "deadline_hours": 36,
+      "checklist": [
+        "Not ekleme ve listeleme endpoint'leri olmalı",
+        "SQLite ile veri kalıcı tutulmalı",
+        "Title ve content alanları olmalı",
+        "CRUD işlemleri çalışmalı"
+      ],
+      "meta": null
+    },
+    {
+      "category": "learn",
+      "name": "FastAPI + SQLAlchemy: Blog API",
+      "description": "Blog post oluşturma ve listeleme API'si geliştirin.",
+      "deadline_hours": 36,
+      "checklist": [
+        "Post oluşturma endpoint'i olmalı",
+        "SQLAlchemy model kullanılmalı",
+        "Post listesi dönebilmeli",
+        "Response model kullanılmalı"
+      ],
+      "meta": null
+    },
+    {
+      "category": "learn",
+      "name": "Flask: Token Authentication Sistemi",
+      "description": "Basit token tabanlı authentication sistemi kurun.",
+      "deadline_hours": 24,
+      "checklist": [
+        "Login endpoint olmalı",
+        "Token üretimi yapılmalı",
+        "Protected endpoint olmalı",
+        "Geçersiz token 401 dönmeli"
+      ],
+      "meta": null
+    },
+    {
+      "category": "learn",
+      "name": "FastAPI: JWT Authentication",
+      "description": "FastAPI ile JWT tabanlı auth sistemi geliştirin.",
+      "deadline_hours": 36,
+      "checklist": [
+        "Register ve login endpoint'leri olmalı",
+        "JWT token üretilmeli",
+        "Protected route olmalı",
+        "Token doğrulama yapılmalı"
+      ],
+      "meta": null
+    },
+    {
+      "category": "learn",
+      "name": "Flask: Middleware (Request Logger)",
+      "description": "Her isteği loglayan bir middleware geliştirin.",
+      "deadline_hours": 20,
+      "checklist": [
+        "Request loglanmalı",
+        "Endpoint fark etmeksizin çalışmalı",
+        "Response süresi ölçülmeli",
+        "Console output olmalı"
+      ],
+      "meta": null
+    },
+    {
+      "category": "learn",
+      "name": "FastAPI: Custom Middleware",
+      "description": "FastAPI'de request/response intercept eden middleware yazın.",
+      "deadline_hours": 20,
+      "checklist": [
+        "Middleware tanımlanmalı",
+        "Request bilgisi loglanmalı",
+        "Response süresi ölçülmeli",
+        "Tüm endpoint'lere uygulanmalı"
+      ],
+      "meta": null
+    },
+    {
+      "category": "learn",
+      "name": "Flask: Dosya Yükleme API",
+      "description": "Kullanıcıların dosya yükleyebildiği bir API geliştirin.",
+      "deadline_hours": 24,
+      "checklist": [
+        "File upload endpoint olmalı",
+        "Dosya diske kaydedilmeli",
+        "Dosya listesi alınabilmeli",
+        "Basit validasyon yapılmalı"
+      ],
+      "meta": null
+    },
+    {
+      "category": "learn",
+      "name": "FastAPI: File Upload API",
+      "description": "FastAPI ile dosya upload ve listeleme sistemi kurun.",
+      "deadline_hours": 24,
+      "checklist": [
+        "Upload endpoint olmalı",
+        "Dosya kaydedilmeli",
+        "Dosya listesi endpoint'i olmalı",
+        "Content-type kontrolü yapılmalı"
+      ],
+      "meta": null
+    },
+    {
+      "category": "learn",
+      "name": "Flask: URL Shortener API",
+      "description": "Kısa link oluşturma servisi geliştirin.",
+      "deadline_hours": 36,
+      "checklist": [
+        "URL kısaltma endpoint olmalı",
+        "Kısa kod üretilmeli",
+        "Redirect endpoint olmalı",
+        "SQLite ile saklanmalı"
+      ],
+      "meta": null
+    },
+    {
+      "category": "learn",
+      "name": "FastAPI: URL Shortener",
+      "description": "FastAPI ile URL kısaltma servisi geliştirin.",
+      "deadline_hours": 36,
+      "checklist": [
+        "Short URL oluşturulmalı",
+        "Redirect endpoint olmalı",
+        "Veri DB'de tutulmalı",
+        "Unique kod üretilmeli"
+      ],
+      "meta": null
+    },
+    {
+      "category": "learn",
+      "name": "Flask: Rate Limiting Sistemi",
+      "description": "Kullanıcı başına istek limiti koyan sistem geliştirin.",
+      "deadline_hours": 24,
+      "checklist": [
+        "IP bazlı limit uygulanmalı",
+        "Limit aşılırsa 429 dönmeli",
+        "Basit in-memory sayaç kullanılmalı",
+        "Middleware veya decorator kullanılmalı"
+      ],
+      "meta": null
+    },
+    {
+      "category": "learn",
+      "name": "FastAPI: Rate Limiting",
+      "description": "FastAPI'de rate limiting mekanizması implement edin.",
+      "deadline_hours": 24,
+      "checklist": [
+        "Limit kontrolü yapılmalı",
+        "429 response dönmeli",
+        "Middleware veya dependency kullanılmalı",
+        "Test edilebilir olmalı"
+      ],
+      "meta": null
+    },
+    {
+      "category": "learn",
+      "name": "Flask: CSV Data API",
+      "description": "CSV dosyasını okuyup API üzerinden veri sunun.",
+      "deadline_hours": 24,
+      "checklist": [
+        "CSV okunmalı",
+        "Veri JSON olarak sunulmalı",
+        "Filtreleme yapılmalı",
+        "Dosya parse edilmeli"
+      ],
+      "meta": null
+    },
+    {
+      "category": "learn",
+      "name": "FastAPI: External API Proxy",
+      "description": "Harici bir API'den veri çekip kendi endpoint'inizden döndürün.",
+      "deadline_hours": 24,
+      "checklist": [
+        "GET isteği yapılmalı",
+        "Response parse edilmeli",
+        "Custom endpoint olmalı",
+        "Hata yönetimi yapılmalı"
+      ],
+      "meta": null
+    },
+    {
+      "category": "learn",
+      "name": "Flask: Basit Search API",
+      "description": "Liste içinde arama yapan bir API geliştirin.",
+      "deadline_hours": 20,
+      "checklist": [
+        "Query param ile arama yapılmalı",
+        "Case-insensitive olmalı",
+        "Partial match desteklenmeli",
+        "Sonuçlar filtrelenmeli"
+      ],
+      "meta": null
+    },
+    {
+      "category": "learn",
+      "name": "FastAPI: Filtering & Pagination API",
+      "description": "Veri filtreleme ve sayfalama yapan API geliştirin.",
+      "deadline_hours": 24,
+      "checklist": [
+        "Pagination olmalı",
+        "Filtreleme olmalı",
+        "Query param kullanılmalı",
+        "Response metadata içermeli"
+      ],
+      "meta": null
+    },
+    {
+      "category": "learn",
+      "name": "Flask: Background Task (Threading)",
+      "description": "Arka planda çalışan basit bir görev sistemi kurun.",
+      "deadline_hours": 24,
+      "checklist": [
+        "Thread kullanılmalı",
+        "Background işlem başlatılmalı",
+        "Status endpoint olmalı",
+        "Ana request bloklanmamalı"
+      ],
+      "meta": null
+    },
+    {
+      "category": "learn",
+      "name": "FastAPI: Background Tasks",
+      "description": "FastAPI background task mekanizmasını kullanın.",
+      "deadline_hours": 20,
+      "checklist": [
+        "BackgroundTasks kullanılmalı",
+        "Async task çalışmalı",
+        "Response hızlı dönmeli",
+        "Task sonucu loglanmalı"
+      ],
+      "meta": null
+    },
+    {
+      "category": "learn",
+      "name": "Flask: Config Yönetimi",
+      "description": "Flask uygulamasında config class yapısı kurun.",
+      "deadline_hours": 16,
+      "checklist": [
+        "Config class olmalı",
+        "Dev/prod ayrımı yapılmalı",
+        "App config'ten beslenmeli",
+        "Environment ile kontrol edilmeli"
+      ],
+      "meta": null
+    },
+    {
+      "category": "learn",
+      "name": "FastAPI: Modular Project Structure",
+      "description": "FastAPI projesini router, service, model katmanlarına bölün.",
+      "deadline_hours": 24,
+      "checklist": [
+        "Router katmanı olmalı",
+        "Service katmanı olmalı",
+        "Model katmanı olmalı",
+        "Kod modüler olmalı"
+      ],
+      "meta": null
+    }
+  ]
+}

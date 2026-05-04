@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Challenge Service — Process Manager
+# Feature Request Service — Process Manager
 # Servis beklenmedik şekilde çökerse otomatik olarak yeniden başlatır.
 #
 # Kullanım:
@@ -49,7 +49,7 @@ fi
 # --fresh onayı (sadece interaktif modda)
 # ---------------------------------------------------------------------------
 if [ "$FRESH_MODE" = true ] && [ "$DAEMON_MODE" = false ] && [ -t 0 ]; then
-    echo "⚠️  FRESH mod: challenges, jury_members ve submissions tabloları temizlenecek!"
+    echo "⚠️  FRESH mod: feature_requests ve ilgili tüm tablolar temizlenecek!"
     read -r -p "Devam etmek için 'evet' yazın: " confirm
     if [ "$confirm" != "evet" ]; then
         echo "İptal edildi."
@@ -61,10 +61,10 @@ fi
 # Daemon modu: kendini arka plana al
 # ---------------------------------------------------------------------------
 if [ "$DAEMON_MODE" = true ]; then
-    nohup "$0" $PYTHON_ARGS >> "$LOG_DIR/challenge_service.log" 2>&1 &
+    nohup "$0" $PYTHON_ARGS >> "$LOG_DIR/feature_request_service.log" 2>&1 &
     DAEMON_PID=$!
     echo "$DAEMON_PID" > "$PID_FILE"
-    echo "Servis arka planda başlatıldı (PID=$DAEMON_PID). Loglar: $LOG_DIR/challenge_service.log"
+    echo "Servis arka planda başlatıldı (PID=$DAEMON_PID). Loglar: $LOG_DIR/feature_request_service.log"
     exit 0
 fi
 
@@ -82,7 +82,7 @@ trap cleanup SIGINT SIGTERM
 # Yeniden başlatma döngüsü
 # ---------------------------------------------------------------------------
 restart_count=0
-log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" | tee -a "$LOG_DIR/challenge_service.log"; }
+log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" | tee -a "$LOG_DIR/feature_request_service.log"; }
 
 log "=== Servis başlatılıyor (mod=$([ "$FRESH_MODE" = true ] && echo FRESH || echo RESUME), MAX_RESTARTS=$MAX_RESTARTS) ==="
 
@@ -93,9 +93,9 @@ while [ "$restart_count" -lt "$MAX_RESTARTS" ]; do
     cd "$PROJECT_ROOT"
     # Sadece ilk başlatmada --fresh geçir; crash sonrası yeniden başlatmalarda RESUME kullan
     if [ "$restart_count" -eq 0 ]; then
-        python -m services.challenge_service $PYTHON_ARGS 2>&1 | tee -a "$LOG_DIR/challenge_service.log"
+        python -m services.feature_request_service $PYTHON_ARGS 2>&1 | tee -a "$LOG_DIR/feature_request_service.log"
     else
-        python -m services.challenge_service 2>&1 | tee -a "$LOG_DIR/challenge_service.log"
+        python -m services.feature_request_service 2>&1 | tee -a "$LOG_DIR/feature_request_service.log"
     fi
     exit_code=${PIPESTATUS[0]}
     set -e

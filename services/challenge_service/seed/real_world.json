@@ -1,0 +1,201 @@
+{
+  "table": "challenge_types",
+  "data": [
+    {
+      "category": "real_world",
+      "name": "AI Toplantı Özetleyici SaaS: Karar ve Aksiyon Kaybı",
+      "description": "Problem özeti: Toplantı sonrası ekip üyeleri farklı anılarla ayrılıyor; Slack thread’lerinde kararlar kayboluyor; ‘kim ne yapacak’ ve ‘ne zamana kadar’ net değil; müşteri görüşmelerinde aksiyonlar CRM’e hiç düşmüyor. Persona: Proje yöneticisi, müşteri başarısı veya ekip lideri; haftada çok sayıda çevrimiçi toplantı, transcript veya toplantı notu biriktiriyor. Hedef ürün: Güvenli hesaplarla giriş yapan kullanıcıların toplantı metnini yapıştırabildiği veya .txt/.md yükleyebildiği, AI ile yapılandırılmış çıktı (özet, karar listesi, aksiyon maddeleri, varsa sahip/atayan, önerilen son tarih) üreten, geçmiş oturumları listeleyen SaaS MVP. Çoklu kiracı: En azından kullanıcı başına tam veri ayrımı. Dışa aktarım: Markdown, JSON veya panoya kopyalama. Kapsam dışı (MVP): Gerçek zamanlı ses transkripsiyonu, video konferans entegrasyonu, Slack bot — isteğe bağlı stretch.",
+      "deadline_hours": 144,
+      "checklist": [
+        "Kayıt: e-posta doğrulama (gerçek SMTP veya dev modda log) veya OAuth (Google/GitHub vb.) seçeneklerinden en az biri",
+        "Giriş/çıkış; şifre bcrypt/argon2 ile hash; düz metin şifre asla loglanmamalı",
+        "Erişim kontrolü: JWT (httpOnly cookie veya Authorization header) veya güvenli oturum; süre dolumu ve yenileme veya yeniden giriş akışı dokümante",
+        "Korumalı route’lar: özet üret, geçmiş listele, sil — anonim erişim 401",
+        "Girdi: çok satırlı metin alanı + dosya yükleme (.txt/.md); maksimum karakter veya bayt limiti ve kullanıcıya anlaşılır hata",
+        "Çıktı şeması: en az özet (3–8 cümle), kararlar (madde madde), aksiyonlar (kim/ne/zaman önerisi); JSON şeması veya sabit UI bölümleri",
+        "Geçmiş: toplantı başlığı veya tarih ile liste; tek kayıt detayı; silme veya arşiv",
+        "Dışa aktarma: en az bir format (MD veya JSON indirme veya kopyala)",
+        "LLM/API anahtarları yalnızca sunucu ortamında; .env.example ile şablon; repoda secret yok",
+        "Doğrulama: boş gövde, aşırı uzun metin, izin verilmeyen content-type reddedilmeli",
+        "AI hatası: zaman aşımı veya provider hatasında 502/503 ve kullanıcıya güvenli mesaj; retry politikası dokümante",
+        "Denetim: kullanıcı_id, toplantı_kaydı_id, zaman damgası ile minimal işlem günlüğü (DB veya dosya)",
+        "README: mimari diyagram veya kısa metin, kurulum, env listesi, lokal çalıştırma, bilinen sınırlar",
+        "Test: en az birim veya entegrasyon testi (ör. auth middleware veya özet endpoint mock)",
+        "İsteğe bağlı stretch: toplantı şablonu (müşteri / iç ekip), çoklu dil çıktısı"
+      ],
+      "meta": {
+        "product_focus": "ai_meeting_summarizer_saas",
+        "personas": ["proje_yoneticisi", "musteri_basarisi", "ekip_lideri"],
+        "suggested_stack_notes": "Backend FastAPI/Flask/Node; DB Postgres/SQLite; frontend isteğe bağlı.",
+        "acceptance_smoke": "Kayıt → giriş → metin yapıştır → özet al → geçmişte gör → çıkış → tekrar girişte veri duruyor.",
+        "non_goals_mvp": ["canli_transkripsiyon", "slack_bot_zorunlu", "crm_entegrasyonu_zorunlu"]
+      }
+    },
+    {
+      "category": "real_world",
+      "name": "Veri İçgörü Üretici: Ham Veriden Anlamlı Sorular",
+      "description": "Problem: Küçük ekip satış, kampanya veya envanter verisini CSV’de taşıyor; hangi segment düşüyor, hangi kanal ROI veriyor tabloda görünmüyor; her analiz için dış pivot uzmanı veya Excel uzmanı gerekiyor. Persona: İşletme sahibi, operasyon veya pazarlama koordinatörü; teknik olmayan doğal dil ile soru sormak istiyor. Hedef: Giriş yapmış kullanıcının veri setini yükleyip adlandırdığı, şema önizlemesi gördüğü, hazır iş soruları veya doğal dil sorgusu ile özet istatistik ve görselleştirme aldığı araç. Güvenlik: Satır bazında başka kullanıcıya veri sızması olmamalı; dataset_id ile yetkisiz erişim engeli. Kapsam dışı: Petabyte ölçek, gerçek zamanlı warehouse, satır bazlı satış tahmini modeli zorunlu değil.",
+      "deadline_hours": 144,
+      "checklist": [
+        "Kayıt/giriş; liste endpoint’i yalnızca oturum sahibinin dataset’lerini döndürmeli",
+        "CSV yükleme: encoding (UTF-8 varsayılan, hata mesajı), ayırıcı tespiti veya seçimi, ilk N satır önizleme",
+        "Sütun tipi: sayı/tarih/metin tahmini veya kullanıcı eşlemesi; tamamen bozuk satırlar için uyarı sayacı",
+        "Hazır şablonlar: en az 3 (ör. toplam satış, kırılıma göre dağılım, zaman serisi basit trend)",
+        "Doğal dil veya şablon seçimi sonrası sunucu tarafı sorgu/plan üretimi; SQL enjeksiyonu yok — parametreli veya sandbox",
+        "Çıktı: sayısal özet + tablo veya grafik (PNG URL, SVG, veya frontend chart veri seti)",
+        "İş özeti: 2–4 cümle ‘ne anlama geliyor’ metni (kural veya LLM; tutarlılık için şablon + LLM dokümante)",
+        "Yetkilendirme: başka kullanıcının dataset_id’si ile 403/404; tahmin edilemez UUID veya benzeri",
+        "Yükleme limiti: dosya boyutu ve satır sayısı; aşımda net hata",
+        "PII: opsiyonel sütun adı uyarısı (email, tc, telefon) veya maskeleme stretch",
+        "Secret ve DB connection string env’de; README’de üretim secret yönetimi (ör. vault referansı)",
+        "Performans: büyük CSV için streaming veya örnekleme stratejisi README’de",
+        "README: örnek CSV, beklenen sütun örnekleri, güvenlik varsayımları",
+        "Test: en az bir yetkisiz erişim ve bir başarılı analiz senaryosu",
+        "İsteğe bağlı stretch: export PNG/CSV sonuç, kayıtlı sorular"
+      ],
+      "meta": {
+        "product_focus": "data_insight_generator",
+        "personas": ["isletme_sahibi", "pazarlama", "operasyon"],
+        "acceptance_smoke": "İki farklı kullanıcı hesabıyla yüklenen dosyaların birbirine karışmaması doğrulanmalı.",
+        "non_goals_mvp": ["gerçek_zamanli_etl", "kurumsal_sso_zorunlu"]
+      }
+    },
+    {
+      "category": "real_world",
+      "name": "Akıllı E-posta Asistanı: Öncelik ve Taslak",
+      "description": "Problem: Gelen kutusu şişkin; acil müşteri mailleri kayboluyor; standart yanıtlar tekrar yazılıyor; ton tutarsız. Persona: Satış, destek veya serbest çalışan; günlük 50+ mail. Hedef: Oturumlu kullanıcının mock veya gerçek gelen kutusu üzerinde öncelik skoru/etiket, seçilen mail için ton seçenekli yanıt taslağı, taslakların kaydı. OAuth ile Gmail/Outlook salt okunur okuma bonus; değilse seed JSON/CSV ile tam kullanıcı akışı zorunlu. Kapsam dışı: Toplu gönderim, spam gönderme, gizli dinleme — yok.",
+      "deadline_hours": 120,
+      "checklist": [
+        "Kayıt/giriş; taslak ve kullanıcı tercihleri (ör. varsayılan ton) kullanıcıya bağlı",
+        "Gelen kutusu: mock REST veya dosyadan yükleme; konu, gönderen, tarih, özet gövde",
+        "Sıralama/filtre: tarih, öncelik, okunmamış benzeri en az biri",
+        "Önceliklendirme: kural (anahtar kelime, gönderen domain) veya skor + kısa gerekçe metni",
+        "Taslak üretimi: profesyonel / kısa / empatik gibi en az iki ton; kullanıcı düzenleyip kaydetmeli",
+        "Panoya kopyala veya taslak kaydı listesi",
+        "AI endpoint throttle: IP veya kullanıcı başına dakikada N istek; aşımda 429",
+        "OAuth kullanılıyorsa: scope dokümante, refresh token güvenli saklama, token istemciye expose edilmez",
+        "Hata: provider kesintisi, boş gelen kutu, seçilmemiş mail için anlamlı mesaj",
+        "Gizlilik: mail içeriği loglarda tam metin olmamalı veya maskeleme politikası",
+        "README: mock senaryosu, OAuth kurulumu (varsa), güvenlik uyarıları",
+        "Test: throttle ve yetkisiz taslak erişimi",
+        "İsteğe bağlı stretch: IMAP salt okunur prototip"
+      ],
+      "meta": {
+        "product_focus": "smart_email_assistant",
+        "personas": ["destek", "satis", "freelancer"],
+        "acceptance_smoke": "Kullanıcı A’nın taslağı kullanıcı B’de görünmemeli.",
+        "non_goals_mvp": ["toplu_gonderim", "otomatik_gonder"]
+      }
+    },
+    {
+      "category": "real_world",
+      "name": "AI Öğrenme Koçu: Hedefe Göre Mikro Plan",
+      "description": "Problem: Öğrenmek istenen konu çok; nereden başlanacağı belirsiz; haftalık ritim yok; ara verince plan dağılıyor. Persona: Kariyer değiştiren profesyonel, bootcamp öğrencisi veya şirket içi upskilling. Hedef: Profil (hedef, mevcut seviye, haftalık süre dakika) ile kişiselleştirilmiş mikro görevler, her adımda öğren + pratik, kontrol sorusu; panoda ilerleme yüzdesi veya tamamlanan adım sayısı. Etik: Yanıltıcı ‘garantili iş’ vaadi yok; tıbbi/hukuki tavsiye üretimi yok. Kapsam dışı: Resmi akreditasyon, canlı mentorluk zorunlu değil.",
+      "deadline_hours": 120,
+      "checklist": [
+        "Kayıt/giriş; plan ve adım ilerlemesi kullanıcıya özel",
+        "Plan oluşturma formu: hedef konu, süre hafta veya gün, haftalık dakika, ön bilgi (beginner/intermediate)",
+        "Üretilen plan: en az 5 mikro adım; her adımda kaynak türü (video, makale, alıştırma) önerisi",
+        "Adım tamamlandı işareti; isteğe bağlı not alanı",
+        "Plan yenileme veya ‘takıldım’ ile kısa alternatif yol (basit kural veya LLM)",
+        "Hesap silme: kullanıcı verisi silinsin veya dışa aktarım + silme akışı README’de",
+        "Çocuk modu yoksa README’de yaş sınırı ve ebeveyn sorumluluğu notu",
+        "LLM env, kota, timeout; uzun plan üretiminde streaming veya iş kuyruğu dokümante",
+        "İçerik güvenliği: zararlı talimat üretimine karşı sistem prompt veya filtre notu",
+        "README: örnek hedefler, sınırlar, etik kullanım, veri saklama süresi",
+        "Test: plan oluştur → adım işaretle → yeniden yüklemede durum korunuyor",
+        "İsteğe bağlı stretch: ICS dışa aktarım, haftalık e-posta hatırlatıcı (mock)"
+      ],
+      "meta": {
+        "product_focus": "ai_learning_coach",
+        "personas": ["kariyer_degisim", "bootcamp_ogrenci", "upskilling"],
+        "acceptance_smoke": "Silinen hesapta planların geri gelmemesi veya export politikasına uyum.",
+        "non_goals_mvp": ["resmi_sertifika", "canli_mentor_zorunlu"]
+      }
+    },
+    {
+      "category": "real_world",
+      "name": "Akıllı Görev Yöneticisi (AI Planner): Bağımlılık ve Odak",
+      "description": "Problem: Görevler araçlar arasında dağınık; bağımlılık ve blokaj görünmüyor; günlük ‘şimdi ne’ kararı yorucu. Persona: Ürün ekibi, ajans veya bireysel danışman. Hedef: Proje veya liste altında görev CRUD, bağımlılık (A blocked by B) veya öncelik skoru, döngü tespiti, ‘bugün odak’ önerisi (topological sort veya basit skor). Çok kullanıcı: workspace veya proje sahibi + üye rolleri (en az görüntüleyici vs düzenleyici veya tek workspace ile başla). Kalıcı depolama zorunlu. Kapsam dışı: Tam Jira özellik paritesi, Gantt zorunlu değil.",
+      "deadline_hours": 144,
+      "checklist": [
+        "Kayıt/giriş; proje/workspace ve görevler kullanıcı veya üyelik tablosu ile bağlı",
+        "RBAC veya basit sahip/üye: üyesi olmayan kullanıcı proje detayına erişemez",
+        "Görev CRUD; alanlar: başlık, açıklama opsiyonel, durum, due date opsiyonel, öncelik opsiyonel",
+        "Bağımlılık: en az ‘blocks’ veya ‘depends_on’ kenarları; döngü oluşturulduğunda kullanıcıya hata",
+        "Bugün odak: due date yakın, bağımlılığı çözülmüş veya topological sıradaki N görev",
+        "AI kullanılıyorsa: gerekçe metni kısa; AI olmadan da kural tabanlı çalışmalı (fallback)",
+        "Kalıcı DB; migration veya şema README’de",
+        "İsteğe bağlı: soft delete, etkinlik günlüğü (kim neyi güncelledi)",
+        "Paylaşım: davet token veya e-posta ile üye ekleme stretch",
+        "README: ER diyagramı veya tablo listesi, rol matrisi",
+        "Test: yetkisiz proje erişimi; döngüsel bağımlılık reddi",
+        "İsteğe bağlı stretch: dışa aktarma JSON, webhook"
+      ],
+      "meta": {
+        "product_focus": "smart_task_manager_ai_planner",
+        "personas": ["urun_ekibi", "ajans", "danisman"],
+        "acceptance_smoke": "Üye olmayan kullanıcı başkasının projesine ID ile erişemez.",
+        "non_goals_mvp": ["tam_jira_parity", "gantt_zorunlu"]
+      }
+    },
+    {
+      "category": "real_world",
+      "name": "E-ticaret Telegram Asistanı: Stok, Ürün ve Satış (RAG)",
+      "description": "Problem: Küçük/orta ölçekli e-ticaret işletmesinde stok, ürün açıklamaları ve sipariş durumu panel, Excel ve mesajlar arasında dağınık; müşteri veya iç ekip ‘X üründen kaç var?’, ‘iade politikası ne?’, ‘son kampanya ne zaman bitti?’ diye soruyor; cevaplar gecikiyor veya tutarsız. Persona: Mağaza sahibi, operasyon veya müşteri temsilcisi. Hedef: Telegram üzerinden çalışan bir bot: (1) yapılandırılmış veriyle stok ve satış özeti (ürün SKU, miktar, eşik altı uyarı), (2) ürün/iade/kargo gibi bilgiler için RAG (politika PDF/SSS metni veya ürün açıklama dokümanları), (3) e-ticaret entegrasyonu: gerçek mağaza API’si (Shopify/WooCommerce/ikas vb.) veya webhook + senkron; entegrasyon yoksa tutarlı mock + CSV import ile tam akış. Güvenlik: Bot token ve API anahtarları sunucuda; mağaza başına veya Telegram mağaza sahibi eşlemesi; başka mağazanın stok verisine erişim yok. Kapsam dışı: Ödeme tahsilatı bot içinden, tam ERP, çoklu pazaryeri tam senkron zorunlu değil.",
+      "deadline_hours": 168,
+      "checklist": [
+        "Telegram Bot API: webhook veya long polling; BOT_TOKEN yalnızca env; /start, yardım ve en az bir komut (ör. /stok, /ozet)",
+        "Mağaza / kullanıcı eşlemesi: Telegram kullanıcı veya chat ID’sinin hangi mağaza kaydına bağlı olduğu (basit onboarding veya tek mağaza MVP)",
+        "Ürün ve stok modeli: SKU veya ürün kodu, ad, miktar, isteğe bağlı kritik stok eşiği; satış kaydı veya günlük satış özeti (adet/ciro) en az bir rapor",
+        "Stok güncelleme: panel/API veya CSV içe aktarma ile; çakışma veya son yazım kazanır dokümante",
+        "E-ticaret entegrasyonu: gerçek API’den ürün/stok çekme VEYA tutarlı mock servis + README’de canlıya geçiş adımları",
+        "RAG: iade, kargo, garanti, ürün özellikleri için metin kaynakları (md/txt veya PDF çıkarımı); chunk + retrieval + LLM; yanıtta kaynak kısa referansı",
+        "Hibrit yanıt: ‘kaç adet var?’ gibi sorularda önce DB’den sayısal doğruluk; politika sorularında RAG; karışık soruda sırayla veya prompt ile ayrım",
+        "Grounding: bilgi tabanında yoksa uydurmama; stok sıfırsa net gösterim",
+        "Oran limiti: Telegram ve LLM çağrısı başına throttle; spam veya uzun mesaj koruması",
+        "Hata ve kesinti: API veya Telegram hata mesajları kullanıcıya zarar vermeyecek şekilde",
+        "İsteğe bağlı: basit yönetici web paneli (ürün/stok/doküman yükleme) veya sadece API + seed",
+        "README: mimari (bot ↔ backend ↔ DB ↔ vektör indeks), env değişkenleri, örnek Telegram konuşması, test mağaza verisi",
+        "Test: bir mağaza kimliğiyle başka mağazanın stok sorgusu dönmemeli; RAG için mock retrieval senaryosu",
+        "İsteğe bağlı stretch: düşük stok bildirimi (scheduled job), çoklu dil, Shopify webhook ile anlık stok"
+      ],
+      "meta": {
+        "product_focus": "ecommerce_telegram_rag_stock",
+        "personas": ["magaza_sahibi", "operasyon", "musteri_temsilcisi"],
+        "channels": ["telegram"],
+        "integrations_examples": ["shopify", "woocommerce", "ikas", "mock_csv"],
+        "acceptance_smoke": "Telegram’dan stok sorgusu → DB ile tutarlı sayı; politika sorusu → RAG kaynaklı yanıt veya ‘bulunamadı’.",
+        "non_goals_mvp": ["bot_icinde_odeme", "tam_erp", "pazaryeri_tam_senkron_zorunlu"]
+      }
+    },
+    {
+      "category": "real_world",
+      "name": "AI Not Düzenleyici: Kaos Notlardan Aranabilir Bilgi",
+      "description": "Problem: Notlar uygulama ve dosyalar arasında dağınık; arama zayıf; etiket yok; aynı konu için duplicate notlar; ekip içi paylaşım güvensiz. Persona: Araştırmacı, öğrenci, ürün yöneticisi. Hedef: Kullanıcıya özel not CRUD, AI ile başlık ve etiket önerisi (onaylı kayıt), tam metin + etiket araması, benzer not önerisi veya kümeleme; dışa aktarma (Markdown veya JSON). Kapsam dışı: Gerçek zamanlı çok kullanıcılı düzenleme (Google Docs seviyesi) zorunlu değil.",
+      "deadline_hours": 120,
+      "checklist": [
+        "Kayıt/giriş; notlar user_id ile sıkı bağlı; path traversal veya ID enumeration’a karşı önlem dokümante",
+        "Not alanları: başlık (AI önerilebilir), gövde, etiket listesi, created_at/updated_at",
+        "AI önerisi: başlık + 3–8 etiket; kullanıcı düzenleyip kaydetmeden canlı DB’ye yazılmamalı veya ‘taslak’ state",
+        "Arama: en az tam metin (SQLite FTS, Postgres tsvector veya basit LIKE ile MVP + iyileştirme notu)",
+        "Filtre: etiket, tarih aralığı",
+        "Benzer not: embedding cosine veya anahtar kelime overlap — README’de yöntem",
+        "Dışa aktarma: tek not veya tümü",
+        "Paylaşım stretch: salt okunur token URL; süre dolumu",
+        "Şifreli not stretch: istemci tarafı şifreleme veya sunucu tarafı anahtar yönetimi dokümante",
+        "Hesap silme: cascade silme veya 30 gün soft delete politikası README’de",
+        "Rate limit: AI öneri endpoint’i",
+        "README: veri modeli, arama sınırları, gizlilik",
+        "Test: başka kullanıcının notuna erişim reddi",
+        "İsteğe bağlı stretch: import Markdown zip"
+      ],
+      "meta": {
+        "product_focus": "ai_note_organizer",
+        "personas": ["arastirmaci", "ogrenci", "urun_yoneticisi"],
+        "acceptance_smoke": "Not ID tahmin edilerek başka kullanıcıya ait içerik okunamıyor.",
+        "non_goals_mvp": ["gerçek_zamanli_coklu_duzenleme_zorunlu"]
+      }
+    }
+  ]
+}

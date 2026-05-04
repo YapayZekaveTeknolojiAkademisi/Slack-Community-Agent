@@ -221,6 +221,7 @@ __marimo__/
 logs/
 .cursor/
 .claude/
+docs/superpowers/
 
 # İşletim sistemi
 .DS_Store

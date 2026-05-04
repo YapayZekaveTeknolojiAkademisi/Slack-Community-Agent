@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Challenge Service — Durdurma Scripti
+# Feature Request Service — Durdurma Scripti
 
 set -euo pipefail
 

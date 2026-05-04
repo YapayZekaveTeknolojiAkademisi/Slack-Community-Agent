@@ -77,3 +77,15 @@ class QueueMessageFormatter(BaseFormatter):
         action = queue_extra.get("action", "-")
         value = queue_extra.get("value", "-")
         return f"{name} ({size}) -- {action} -- {value}"
+
+
+# ---- CLUSTERING FORMATTER -----------------------------------------------
+class ClusteringFormatter(BaseFormatter):
+    """Her clustering çalışmasını tek satır JSON olarak yazar.
+
+    Kullanım:
+        logger.info("run", extra={"clustering": {...clustering_log dict...}})
+    """
+    def format(self, record: logging.LogRecord) -> str:
+        data = getattr(record, "clustering", {})
+        return json.dumps(data, ensure_ascii=False, default=str)

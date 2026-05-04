@@ -10,13 +10,53 @@ Sonraki sürüme taşınacak değişiklikler. Eklerken mümkünse **`packages/..
 
 ### Added
 
+#### Dağıtım (Docker)
+
+- **`docker-compose.yml`:** `postgres` (pgvector/pg16), tek seferlik **`migrate`** (`alembic upgrade head`), **`challenge`**, **`event`** (varsayılan CMD override ile Socket kapalı scheduler), `pgdata` ve `hf_cache` volume’ları; **`feature-request`** servisi `feature-standalone` profili ile (challenge ile aynı anda Socket açmamak için ayrıldı).
+- **`.dockerignore`:** İmaj boyutunu düşürmek için `.venv`, `.git`, `logs` vb. hariç tutuldu.
+- **`services/challenge_service/Dockerfile`**, **`services/event_service/Dockerfile`**, **`services/feature_request_service/Dockerfile`:** Proje kökünden build; Python 3.12 slim, `libgomp1` / `build-essential`, ortak `requirements.txt` ve `PYTHONPATH=/app`; çalışma kullanıcısı `appuser` (uid 1000).
+
+#### `services/challenge_service`
+
+- **`api/state.py`**, **`api/__init__.py`:** 10 dakikalık teslimat penceresi için thread-safe bellek içi durum (`SubmissionWindowState` / `active_state`: `is_submission_open`, `set_submission_deadline`, `clear_submission_deadline`). Daha önce `handlers/commands/internal.py` ve `handlers/events/internal.py` `...api.state` modülüne referans veriyordu; dosya eksikliği import hatasına yol açıyordu.
+
+#### `packages/settings`
+
+- **Feature Request** yapılandırması: kota, rolling pencere günü, benzerlik / fraud eşikleri, `pending_bypass` temizlik saati, vektör idle aralığı, günlük embed-retry ve haftalık kümeleme / rapor zamanları (`event_timezone` ile uyumlu monitör yorumları için); `feature_request_similarity_exact >= feature_request_similarity_warning` doğrulaması.
+
+#### `.env.template`
+
+- `EVENT_CHANNEL`, LLM anahtarları (`GROQ_API_KEY`, `GEMINI_API_KEY`, `HF_TOKEN`), Feature Request ve Event opsiyonel env satırları genişletildi / hizalandı.
+
 ### Changed
+
+#### `packages/database`
+
+- **`repository/event.py`:** `list_current_month` ve `list_approved_for_interest_form` içinde “bugün” / pencere `get_settings().event_timezone` (`ZoneInfo`) ile yerel tarihe göre hesaplanıyor (yalnızca UTC kullanımı kaldırıldı).
+- **`repository/feature_request.py`:** Haftalık / rolling pencere `feature_request_rolling_window_days` ve UTC `created_at` ile; fraud için `list_embedded_others_since`; `delete_stale_pending_bypass` kesimi `datetime.utcnow` yerine `timezone.utc` ile.
+
+#### `services/event_service`
+
+- **`core/scheduler.py`:** Modül ve bölüm yorumları sabit “72 saat” yerine `event_approval_timeout_hours` ile uyumlu olacak şekilde güncellendi.
+
+#### `services/feature_request_service`
+
+- **`service.py`:** Kota, benzerlik ve tutarlılık eşikleri, fraud penceresi ve rapor notları `get_settings()` üzerinden; `detect_fraud` rolling pencerede diğer kullanıcıların `embedded` kayıtlarıyla sınırlı; `cleanup_stale_pending_requests(None)` ayardaki saatleri kullanır; `retry_failed_embeddings` öncesi esnek `pending_bypass` temizliği.
+- **`core/monitor/feature_monitor.py`:** Tüm zamanlamalar `get_settings()` alanlarından; günlük/haftalık tetikleyiciler `event_timezone` (`ZoneInfo`) ile yorumlanıyor.
 
 ### Deprecated
 
 ### Removed
 
 ### Fixed
+
+#### `services/challenge_service`
+
+- Eksik **`api.state`** modülü nedeniyle handler import zincirinin kırılması giderildi (`ModuleNotFoundError: services.challenge_service.api`).
+
+#### `services/feature_request_service`
+
+- Fraud skorunda docstring’te belirtilen “son N gün” ile uyum için DB tarafında tarih filtresi (`list_embedded_others_since`); önceden tüm `embedded` kayıtlar taranıyordu.
 
 ### Security
 
@@ -149,4 +189,4 @@ Sonraki sürüme taşınacak değişiklikler. Eklerken mümkünse **`packages/..
 - **`README.md`:** Paketler, servisler, özellikler, kapsam ve sürüm notları bağlantısı.
 - **`CHANGELOG.md`:** Bu dosya — değişiklik geçmişi.
 - **`.env.template`:** `Settings` ile uyumlu ortam değişkeni şablonu.
-- **`requiremets.txt`:** Python bağımlılık listesi (proje kökü).
+- **`requirements.txt`:** Python bağımlılık listesi (proje kökü).

@@ -1,13 +1,78 @@
+from __future__ import annotations
+
 from typing import Optional
+
+from pydantic import AliasChoices, Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from pydantic import Field, field_validator, ConfigDict
 
 
 class SystemSettings(BaseSettings):
     # Slack Ayarları
     slack_bot_token: str = Field(..., description="Slack Bot Token (xoxb-...)")
     slack_app_token: str = Field(..., description="Slack App Token (xapp-...)")
-    slack_user_token: str = Field(..., description="Slack User Token (xoxp-...) - Kanal oluşturma için")
+    slack_user_token: str = Field(
+        ..., description="Slack User Token (xoxp-...) - Kanal oluşturma için"
+    )
+
+    slack_workspace_owner_id: Optional[str] = Field(
+        None,
+        validation_alias=AliasChoices("SLACK_WORKSPACE_OWNER_ID", "slack_workspace_owner_id"),
+        description="Workspace owner Slack user ID (opsiyonel)",
+    )
+    slack_admin_slack_id_csv: str = Field(
+        "",
+        validation_alias=AliasChoices("SLACK_ADMIN_SLACK_ID", "slack_admin_slack_id_csv"),
+        description="Admin(ler) Slack user ID — virgülle ayrılmış veya tek ID; ilk ID slack_admin_slack_id olarak kullanılır",
+    )
+    slack_challenge_channel: str = Field(
+        ...,
+        validation_alias=AliasChoices("SLACK_CHALLENGE_CHANNEL", "slack_challenge_channel"),
+        description="/challenge komutlarının ana kanalı (C...)",
+    )
+    slack_admin_channel: str = Field(
+        ...,
+        validation_alias=AliasChoices("SLACK_ADMIN_CHANNEL", "slack_admin_channel"),
+        description="Admin bildirim kanalı (C...)",
+    )
+    slack_admins_raw: str = Field(
+        "",
+        validation_alias=AliasChoices("SLACK_ADMINS", "slack_admins_raw"),
+        description="Virgülle ayrılmış admin Slack user ID (opsiyonel)",
+    )
+    slack_command_channels_raw: str = Field(
+        "",
+        validation_alias=AliasChoices("SLACK_COMMAND_CHANNELS", "slack_command_channels_raw"),
+        description="Virgülle ayrılmış komut kanalı ID; boşsa SLACK_CHALLENGE_CHANNEL kullanılır",
+    )
+    slack_startup_channel: Optional[str] = Field(None, description="Slack Startup Channel ID")
+    slack_report_channel: Optional[str] = Field(None, description="Slack Report Channel ID")
+
+    monitor_challenge_interval: int = Field(
+        60,
+        ge=1,
+        validation_alias=AliasChoices("MONITOR_CHALLENGE_INTERVAL", "monitor_challenge_interval"),
+    )
+    monitor_deadline_interval: int = Field(
+        300,
+        ge=1,
+        validation_alias=AliasChoices("MONITOR_DEADLINE_INTERVAL", "monitor_deadline_interval"),
+    )
+    monitor_evaluation_interval: int = Field(
+        600,
+        ge=1,
+        validation_alias=AliasChoices("MONITOR_EVALUATION_INTERVAL", "monitor_evaluation_interval"),
+    )
+
+    evaluation_max_wait_hours: int = Field(
+        24,
+        ge=1,
+        validation_alias=AliasChoices("EVALUATION_MAX_WAIT_HOURS", "evaluation_max_wait_hours"),
+    )
+    evaluation_jury_count: int = Field(
+        2,
+        ge=1,
+        validation_alias=AliasChoices("EVALUATION_JURY_COUNT", "evaluation_jury_count"),
+    )
 
     # Groq API
     groq_api_key: Optional[str] = Field(None, description="Groq Cloud API anahtarı")
@@ -15,53 +80,311 @@ class SystemSettings(BaseSettings):
     # Gemini API
     gemini_api_key: Optional[str] = Field(None, description="Gemini API anahtarı")
 
+    # Hugging Face (Model indirme / API kullanımı için)
+    hf_token: Optional[str] = Field(
+        None, description="Hugging Face API anahtarı (HF_TOKEN)"
+    )
+
     # SMTP (STARTTLS; tipik olarak 587 — env → get_settings() → packages.smtp.SmtpClient)
     smtp_email: Optional[str] = Field(None, description="SMTP gönderen adresi")
-    smtp_password: Optional[str] = Field(None, description="SMTP şifresi (Gmail için App Password önerilir)")
+    smtp_password: Optional[str] = Field(
+        None, description="SMTP şifresi (Gmail için App Password önerilir)"
+    )
     smtp_host: str = Field("smtp.gmail.com", description="SMTP sunucu host")
-    smtp_port: int = Field(587, ge=1, description="SMTP port (STARTTLS için genelde 587)")
-    smtp_timeout: int = Field(10, ge=1, description="SMTP bağlantı zaman aşımı (saniye)")
-    admin_email: Optional[str] = Field(None, description="Admin e-posta adresi (virgülle ayrılmış birden fazla)")
+    smtp_port: int = Field(
+        587, ge=1, description="SMTP port (STARTTLS için genelde 587)"
+    )
+    smtp_timeout: int = Field(
+        10, ge=1, description="SMTP bağlantı zaman aşımı (saniye)"
+    )
+    admin_email: Optional[str] = Field(
+        None, description="Admin e-posta adresi (virgülle ayrılmış birden fazla)"
+    )
 
-    # Slack Bilgileri
-    slack_admins: list[str] = Field(..., description="Slack Admin ID listesi")
-    slack_startup_channel: Optional[str] = Field(None, description="Slack Startup Channel ID")
-    slack_report_channel: Optional[str] = Field(None, description="Slack Report Channel ID")
-    slack_command_channels: list[str] = Field(..., description="Slack Command Channel ID listesi")
+    @property
+    def smtp_enabled(self) -> bool:
+        """SMTP aktif mi? Hem `smtp_email` hem `smtp_password` dolu olmalı."""
+        return bool(self.smtp_email) and bool(self.smtp_password)
 
-    # Database Ayarları
-    username: str = Field(..., description="Veritabanı kullanıcı adı")
-    password: str = Field(..., description="Veritabanı şifresi")
-    host: str = Field(..., description="Veritabanı host")
-    port: int = Field(..., description="Veritabanı port")
-    database: str = Field(..., description="Veritabanı adı")
+    # Event Service Ayarlari
+    event_channel: str = Field(
+        ...,
+        validation_alias=AliasChoices("EVENT_CHANNEL", "event_channel"),
+        description="Etkinlik komut kanalı (C...)",
+    )
+    event_reminder_enabled: bool = Field(True, description="Hatirlatma sistemi acik/kapali")
+    event_approval_timeout_hours: int = Field(72, ge=1, description="Admin onay suresi (saat)")
+    event_timezone: str = Field("Europe/Istanbul", description="Etkinlik saatlerinin yorumlanacagi IANA timezone (zoneinfo)")
+    event_morning_reminder_hour: int = Field(8, ge=0, le=23, description="Gun basi hatirlatma saati (yerel TZ)")
+
+    # Feature Request Service (/cemilimyapar) — kotanın zamanı UTC created_at ile (rolling pencere)
+    feature_request_weekly_quota: int = Field(
+        2,
+        ge=1,
+        validation_alias=AliasChoices(
+            "FEATURE_REQUEST_WEEKLY_QUOTA", "feature_request_weekly_quota"
+        ),
+        description="Kullanici basina rolling penceredeki talep kotasi",
+    )
+    feature_request_rolling_window_days: int = Field(
+        7,
+        ge=1,
+        validation_alias=AliasChoices(
+            "FEATURE_REQUEST_ROLLING_WINDOW_DAYS",
+            "feature_request_rolling_window_days",
+        ),
+        description="Kota, benzerlik ve fraud icin gun sayisi",
+    )
+    feature_request_similarity_warning: float = Field(
+        0.80,
+        ge=0.0,
+        le=1.0,
+        validation_alias=AliasChoices(
+            "FEATURE_REQUEST_SIMILARITY_WARNING",
+            "feature_request_similarity_warning",
+        ),
+        description="Benzer kayit uyari esigi (cosine)",
+    )
+    feature_request_similarity_exact: float = Field(
+        0.90,
+        ge=0.0,
+        le=1.0,
+        validation_alias=AliasChoices(
+            "FEATURE_REQUEST_SIMILARITY_EXACT", "feature_request_similarity_exact"
+        ),
+        description="Birebir sayilacak benzerlik esigi (cosine)",
+    )
+    feature_request_fraud_threshold: float = Field(
+        0.90,
+        ge=0.0,
+        le=1.0,
+        validation_alias=AliasChoices(
+            "FEATURE_REQUEST_FRAUD_THRESHOLD", "feature_request_fraud_threshold"
+        ),
+        description="Fraud skoru icin benzerlik esigi",
+    )
+    feature_request_pending_bypass_cleanup_hours: int = Field(
+        24,
+        ge=1,
+        validation_alias=AliasChoices(
+            "FEATURE_REQUEST_PENDING_BYPASS_CLEANUP_HOURS",
+            "feature_request_pending_bypass_cleanup_hours",
+        ),
+        description="pending_bypass taslaklarini silme esigi (saat)",
+    )
+    feature_request_vector_idle_interval_seconds: int = Field(
+        900,
+        ge=60,
+        validation_alias=AliasChoices(
+            "FEATURE_REQUEST_VECTOR_IDLE_INTERVAL_SECONDS",
+            "feature_request_vector_idle_interval_seconds",
+        ),
+        description="Vector model bellekten bosaltma kontrol araligi (saniye)",
+    )
+    feature_request_embed_retry_hour: int = Field(
+        3,
+        ge=0,
+        le=23,
+        validation_alias=AliasChoices(
+            "FEATURE_REQUEST_EMBED_RETRY_HOUR", "feature_request_embed_retry_hour"
+        ),
+    )
+    feature_request_embed_retry_minute: int = Field(
+        0,
+        ge=0,
+        le=59,
+        validation_alias=AliasChoices(
+            "FEATURE_REQUEST_EMBED_RETRY_MINUTE",
+            "feature_request_embed_retry_minute",
+        ),
+    )
+    feature_request_clustering_weekday: int = Field(
+        2,
+        ge=0,
+        le=6,
+        validation_alias=AliasChoices(
+            "FEATURE_REQUEST_CLUSTERING_WEEKDAY",
+            "feature_request_clustering_weekday",
+        ),
+        description="Kumeleme gunu (0=Pzt ... 6=Paz)",
+    )
+    feature_request_cluster_fail_before_pipeline_hour: int = Field(
+        2,
+        ge=0,
+        le=23,
+        validation_alias=AliasChoices(
+            "FEATURE_REQUEST_CLUSTER_FAIL_BEFORE_PIPELINE_HOUR",
+            "feature_request_cluster_fail_before_pipeline_hour",
+        ),
+    )
+    feature_request_cluster_fail_before_pipeline_minute: int = Field(
+        0,
+        ge=0,
+        le=59,
+        validation_alias=AliasChoices(
+            "FEATURE_REQUEST_CLUSTER_FAIL_BEFORE_PIPELINE_MINUTE",
+            "feature_request_cluster_fail_before_pipeline_minute",
+        ),
+    )
+    feature_request_clustering_hour: int = Field(
+        3,
+        ge=0,
+        le=23,
+        validation_alias=AliasChoices(
+            "FEATURE_REQUEST_CLUSTERING_HOUR", "feature_request_clustering_hour"
+        ),
+    )
+    feature_request_clustering_minute: int = Field(
+        0,
+        ge=0,
+        le=59,
+        validation_alias=AliasChoices(
+            "FEATURE_REQUEST_CLUSTERING_MINUTE",
+            "feature_request_clustering_minute",
+        ),
+    )
+    feature_request_report_weekday: int = Field(
+        5,
+        ge=0,
+        le=6,
+        validation_alias=AliasChoices(
+            "FEATURE_REQUEST_REPORT_WEEKDAY", "feature_request_report_weekday"
+        ),
+        description="Haftalik rapor gunu (0=Pzt ... 6=Paz)",
+    )
+    feature_request_cluster_fail_before_report_hour: int = Field(
+        9,
+        ge=0,
+        le=23,
+        validation_alias=AliasChoices(
+            "FEATURE_REQUEST_CLUSTER_FAIL_BEFORE_REPORT_HOUR",
+            "feature_request_cluster_fail_before_report_hour",
+        ),
+    )
+    feature_request_cluster_fail_before_report_minute: int = Field(
+        0,
+        ge=0,
+        le=59,
+        validation_alias=AliasChoices(
+            "FEATURE_REQUEST_CLUSTER_FAIL_BEFORE_REPORT_MINUTE",
+            "feature_request_cluster_fail_before_report_minute",
+        ),
+    )
+    feature_request_report_hour: int = Field(
+        10,
+        ge=0,
+        le=23,
+        validation_alias=AliasChoices(
+            "FEATURE_REQUEST_REPORT_HOUR", "feature_request_report_hour"
+        ),
+    )
+    feature_request_report_minute: int = Field(
+        0,
+        ge=0,
+        le=59,
+        validation_alias=AliasChoices(
+            "FEATURE_REQUEST_REPORT_MINUTE", "feature_request_report_minute"
+        ),
+    )
+
+    # Database Ayarları (POSTGRES_* veya username/password/host/port/database)
+    username: str = Field(
+        ...,
+        validation_alias=AliasChoices("POSTGRES_USER", "username"),
+        description="Veritabanı kullanıcı adı",
+    )
+    password: str = Field(
+        ...,
+        validation_alias=AliasChoices("POSTGRES_PASSWORD", "password"),
+        description="Veritabanı şifresi",
+    )
+    host: str = Field(
+        ...,
+        validation_alias=AliasChoices("POSTGRES_HOST", "host"),
+        description="Veritabanı host",
+    )
+    port: int = Field(
+        ...,
+        validation_alias=AliasChoices("POSTGRES_PORT", "port"),
+        description="Veritabanı port",
+    )
+    database: str = Field(
+        ...,
+        validation_alias=AliasChoices("POSTGRES_DB", "database"),
+        description="Veritabanı adı",
+    )
     db_pool_size: int = Field(5, ge=1, description="SQLAlchemy pool boyutu")
     db_max_overflow: int = Field(10, ge=0, description="Pool overflow bağlantı sayısı")
-    db_pool_timeout: int = Field(30, ge=1, description="Pool'dan bağlantı bekleme süresi (saniye)")
-    db_pool_pre_ping: bool = Field(True, description="Bağlantı kullanılmadan önce canlılık kontrolü")
-    db_pool_recycle: int = Field(3600, ge=60, description="Bağlantıların yenileneceği süre (saniye)")
+    db_pool_timeout: int = Field(
+        30, ge=1, description="Pool'dan bağlantı bekleme süresi (saniye)"
+    )
+    db_pool_pre_ping: bool = Field(
+        True, description="Bağlantı kullanılmadan önce canlılık kontrolü"
+    )
+    db_pool_recycle: int = Field(
+        3600, ge=60, description="Bağlantıların yenileneceği süre (saniye)"
+    )
 
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
         case_sensitive=False,
-        extra="ignore"
+        extra="ignore",
     )
 
-    @field_validator('slack_admins', 'slack_command_channels', mode='before')
-    @classmethod
-    def parse_comma_separated_list(cls, v: str) -> list[str]:
-        """Virgülle ayrılmış string'i listeye çevirir."""
-        if isinstance(v, list):
-            return v
-        if not v:
-            return []
-        return [item.strip() for item in v.split(',') if item.strip()]
+    def _parsed_slack_admins(self) -> list[str]:
+        raw = (self.slack_admins_raw or "").strip()
+        if raw:
+            return [x.strip() for x in raw.split(",") if x.strip()]
+        sid = (self.slack_admin_slack_id_csv or "").strip()
+        if sid:
+            return [x.strip() for x in sid.split(",") if x.strip()]
+        return []
 
-# Global Settings Instance
-_settings = SystemSettings()
+    @property
+    def slack_admins(self) -> list[str]:
+        return self._parsed_slack_admins()
+
+    @property
+    def slack_command_channels(self) -> list[str]:
+        raw = (self.slack_command_channels_raw or "").strip()
+        if raw:
+            out = [x.strip() for x in raw.split(",") if x.strip()]
+            if out:
+                return out
+        return [self.slack_challenge_channel]
+
+    @property
+    def slack_admin_slack_id(self) -> str:
+        """Slack API'de tek kullanıcı bekleyen çağrılar için ilk admin ID."""
+        admins = self._parsed_slack_admins()
+        return admins[0] if admins else ""
+
+    @model_validator(mode="after")
+    def _sync_slack_admin_fields(self) -> SystemSettings:
+        if not self._parsed_slack_admins():
+            raise ValueError("SLACK_ADMINS veya SLACK_ADMIN_SLACK_ID tanımlanmalıdır.")
+        return self
+
+    @model_validator(mode="after")
+    def _feature_request_similarity_order(self) -> SystemSettings:
+        if self.feature_request_similarity_exact < self.feature_request_similarity_warning:
+            raise ValueError(
+                "FEATURE_REQUEST_SIMILARITY_EXACT, FEATURE_REQUEST_SIMILARITY_WARNING "
+                "degerinden kucuk olamaz."
+            )
+        return self
+
+
+_settings: SystemSettings | None = None
+
+
 def get_settings(reload: bool = False) -> SystemSettings:
     global _settings
     if _settings is None or reload:
         _settings = SystemSettings()
     return _settings
+
+
+# Geriye dönük tip / import uyumu
+Settings = SystemSettings

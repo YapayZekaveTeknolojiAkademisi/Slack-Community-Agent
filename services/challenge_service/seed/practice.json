@@ -1,0 +1,161 @@
+{
+  "table": "challenge_types",
+  "data": [
+    {
+      "category": "practice",
+      "name": "Yansıtıcı Ajan Zinciri: Taslak → Eleştiri → Revizyon (CrewAI + LangChain + Gemini)",
+      "description": "Üç ajanlı zincir: (1) Yazar – kullanıcı konusunda ilk taslağı üretir, (2) Eleştirmen – taslağı hata, tutarsızlık ve eksiklik açısından değerlendirir, (3) Revizyon Uzmanı – eleştirileri işleyerek iyileştirilmiş son sürümü oluşturur. Her adımda LangChain prompt şablonları ve yapılandırılmış çıktı ayrıştırıcıları kullanılır. Gemini (`gemini-1.5-flash/pro`) tüm LLM çağrılarını yönetir. Çıktı: ilk taslak, eleştiri maddeleri ve revize edilmiş metin. İsteğe bağlı: kullanıcı revizyonları kabul/reddedebilir.",
+      "deadline_hours": 96,
+      "checklist": [
+        "`requirements.txt` veya `pyproject.toml` içinde `crewai`, `langchain`, `langchain-google-genai` sabit sürümlerle",
+        "CrewAI: 3 Agent (Yazar, Eleştirmen, Revizyon) ve sıralı Task'lar; Process.sequential",
+        "LangChain: `ChatPromptTemplate` + `StrOutputParser` veya `PydanticOutputParser` kullanımı; en az bir zincirde LCEL (`|`) operatörü",
+        "Gemini: `ChatGoogleGenerativeAI`; model adı ve sıcaklık env'den veya config'den okunur; `GOOGLE_API_KEY`",
+        "Eleştirmen çıktısı yapılandırılmış (JSON veya madde işaretli) olmalı; Revizyon bu yapıyı girdi olarak almalı",
+        "Hata yönetimi: ağ hatası, 429, timeout – en az 2 kez yeniden dene, log'a PII maskeli yaz",
+        "CLI veya basit REST: kullanıcıdan konu metni al, akışı çalıştır, üç çıktıyı göster ve kaydet (JSON + Markdown)",
+        "README: kurulum, env değişkenleri, örnek çalıştırma, diyagram (Yazar→Eleştirmen→Revizyon)",
+        "Test: mock LLM ile adım sırası ve revizyonun eleştirilere yanıt verdiğini doğrula",
+        "İsteğe bağlı stretch: her revizyondan sonra kullanıcı onayı veya ek eleştiri turu"
+      ],
+      "meta": {
+        "product_focus": "reflective_writing_agent",
+        "pattern": "sequential_critique_revise",
+        "min_agents": 3,
+        "required_frameworks": ["crewai", "langchain"],
+        "required_llm": "google_gemini",
+        "langchain_integration": "PromptTemplate + OutputParser + LCEL with ChatGoogleGenerativeAI",
+        "suggested_role_examples": ["yazar", "elestirmen", "revizyon_uzmani"],
+        "deliverables": ["requirements_lock", "transcript_schema", "final_document", "readme_with_example"],
+        "acceptance_smoke": "3 ajan sırayla çalışır; tüm LLM çağrıları Gemini üzerinden; revizyon çıktısı eleştirileri yansıtır.",
+        "non_goals_mvp": ["çok_turlu_diyalog", "paralel_ajanlar", "sadece_openai"]
+      }
+    },
+    {
+      "category": "practice",
+      "name": "RAG Sorgu Ekibi: Planlama → Bilgi Getirme → Cevap Üretme (CrewAI + LangChain + Gemini + Vektör DB)",
+      "description": "Belgeler (PDF, .txt, .md) yüklenir, vektör deposunda (Chroma veya FAISS) saklanır. Üç ajan: (1) Sorgu Planlayıcı – kullanıcı sorusunu alt sorulara böler ve hangi belgelere bakılacağını seçer, (2) Bilgi Getirici – LangChain retriever ile ilgili parçaları alır ve özetler, (3) Cevap Üretici – parçaları ve planı kullanarak nihai yanıtı oluşturur. CrewAI sıralı task'larla çalışır. Gemini tüm adımlarda LLM olarak kullanılır. Çıktı: yanıt + kullanılan kaynak referansları.",
+      "deadline_hours": 120,
+      "checklist": [
+        "Bağımlılıklar: `crewai`, `langchain`, `langchain-google-genai`, `chromadb` veya `faiss-cpu`, `pypdf` (PDF okumak için)",
+        "CrewAI: 3 Agent (Planlayıcı, Getirici, Üretici) ve sıralı Task'lar; ara çıktılar (plan, doküman özetleri) sonraki göreve aktarılır",
+        "LangChain: `RecursiveCharacterTextSplitter`, `Chroma` veya `FAISS`, `ChatPromptTemplate`, `StrOutputParser`; retriever işlemleri `as_retriever()`",
+        "Gemini: `ChatGoogleGenerativeAI` ile gömme vektörleri için `GoogleGenerativeAIEmbeddings` (isteğe bağlı, yoksa başka embedding kullanılabilir ama tercihen Gemini)",
+        "Belge yükleme: CLI argümanı veya sabit bir klasör; her çalıştırmada yeniden indexleme veya önbelleğe alma",
+        "Sorgu Planlayıcı çıktısı yapılandırılmış (JSON: alt_sorular, hedef_belgeler); Getirici bu planı kullanır",
+        "Hata yönetimi: belge yoksa veya retriever boş dönerse, Üretici bilgi eksikliğini belirtir",
+        "Çıktı: JSON (yanıt, kaynak metin parçaları, plan) + okunabilir Markdown",
+        "README: belge yükleme adımı, örnek sorgu, mimari şeması",
+        "Test: mock retriever ile planlama → getirme → üretme akışı",
+        "İsteğe bağlı stretch: kullanıcının belge yüklemesine izin veren basit bir FastAPI endpoint'i"
+      ],
+      "meta": {
+        "product_focus": "rag_query_team",
+        "pattern": "plan_retrieve_generate",
+        "min_agents": 3,
+        "required_frameworks": ["crewai", "langchain"],
+        "required_llm": "google_gemini",
+        "langchain_integration": "RetrievalQA chain benzeri ancak CrewAI task'ları ile ayrıştırılmış; embedding + vectorstore",
+        "suggested_role_examples": ["sorgu_planlayici", "bilgi_getirici", "cevap_uretici"],
+        "deliverables": ["requirements_lock", "example_docs/", "query_output_schema", "readme_rag_setup"],
+        "acceptance_smoke": "Verilen bir belge kümesi üzerinde soru sorulunca, planlama + getirme + üretme adımları Gemini ile çalışır; yanıt kaynak gösterir.",
+        "non_goals_mvp": ["web_scraping", "çok_kullanıcılı_session", "dinamik_belge_güncelleme"]
+      }
+    },
+    {
+      "category": "practice",
+      "name": "Kod İnceleme Konseyi: Statik Analiz → Güvenlik → Performans (CrewAI + LangChain + Gemini)",
+      "description": "Bir kod parçası (Python/JavaScript) verildiğinde üç uzman ajan sırayla inceleme yapar: (1) Statik Analist – stil hataları, potansiyel bug'lar, dokümantasyon eksikliği, (2) Güvenlik Müfettişi – OWASP riskleri, injection, güvensiz fonksiyonlar, (3) Performans Mühendisi – zaman karmaşıklığı, gereksiz döngüler, bellek kullanımı. Her ajan kendi bulgularını yapılandırılmış formatta (JSON) üretir. Son olarak bir Özetleyici Ajan (4. ajan – isteğe bağlı) tüm raporları birleştirir ve öncelikli aksiyon maddeleri çıkarır. Gemini LLM olarak kullanılır, LangChain prompt yönetimi ve çıktı ayrıştırma için kullanılır.",
+      "deadline_hours": 108,
+      "checklist": [
+        "Bağımlılıklar: `crewai`, `langchain`, `langchain-google-genai`, `black` veya `pylint` (statik analiz için opsiyonel, ancak ajan kendi kendine yorum yapabilir)",
+        "CrewAI: en az 3 ajan (Statik, Güvenlik, Performans) + opsiyonel 4. ajan (Özetleyici); sıralı Process",
+        "LangChain: her ajan için `ChatPromptTemplate` + `PydanticOutputParser` ile yapılandırılmış JSON çıktı zorunluluğu; Gemini LLM",
+        "Kod girdisi: CLI'dan dosya yolu veya doğrudan metin; maksimum 500 satır (daha büyüğü için uyarı)",
+        "Her ajan, kendinden önceki ajanların raporlarını (bağlam olarak) alabilir – ancak bağımsız inceleme de kabul edilir (README'de belirt)",
+        "Çıktı: her ajanın raporu (JSON) ve Özetleyici varsa final rapor (Markdown veya JSON)",
+        "Hata yönetimi: Gemini yanıtı ayrıştırılamazsa, ham metni ve hatayı logla, kullanıcıya göster",
+        "README: örnek kod girişi, beklenen çıktı formatı, güvenlik uyarısı (gerçek kodu değerlendirirken dikkat)",
+        "Test: mock LLM ile her ajanın doğru şemada çıktı ürettiğini kontrol et",
+        "İsteğe bağlı stretch: ajanların çakışan önerilerini çözmek için oylama mekanizması"
+      ],
+      "meta": {
+        "product_focus": "code_review_council",
+        "pattern": "sequential_expert_reviews",
+        "min_agents": 3,
+        "required_frameworks": ["crewai", "langchain"],
+        "required_llm": "google_gemini",
+        "langchain_integration": "PydanticOutputParser ile yapılandırılmış çıktı; prompt template'lerde kod ve bağlam değişkenleri",
+        "suggested_role_examples": ["statik_analist", "guvenlik_muayene", "performans_muhendisi", "ozetleyici"],
+        "deliverables": ["requirements_lock", "review_schema", "sample_review_output.md", "readme_code_review"],
+        "acceptance_smoke": "Küçük bir kod parçası (örneğin hatalı ve güvensiz bir fonksiyon) verildiğinde üç ajan da farklı kategorilerde bulgu üretir; çıktılar yapılandırılmıştır.",
+        "non_goals_mvp": ["gerçek_linter_entegrasyonu", "otomatik_düzeltme_patch", "çok_dilli_kod"]
+      }
+    },
+    {
+      "category": "practice",
+      "name": "Müşteri Şikayet Çözüm Hattı: Duygu → Kategori → Çözüm → Yanıt (CrewAI + LangChain + Gemini)",
+      "description": "Müşteri şikayet metnini alan dört ajanlı bir akış: (1) Duygu Analisti – öfke, hayal kırıklığı, aciliyet seviyesi, (2) Kategori Uzmanı – sorunu teknik, faturalama, kargo, ürün vs. sınıflandırır, (3) Çözüm Mimarı – önceki adımların çıktılarına göre olası çözüm önerileri (iade, hediye kuponu, teknik destek) ve aksiyon maddeleri üretir, (4) Yanıt Yazarı – müşteriye gönderilecek empatik, profesyonel e-posta taslağını oluşturur. Tüm ajanlar sıralı task'larla çalışır. LangChain ile prompt şablonları ve zincirleme, Gemini ile doğal dil anlama ve üretimi.",
+      "deadline_hours": 96,
+      "checklist": [
+        "`crewai`, `langchain`, `langchain-google-genai` bağımlılıkları",
+        "CrewAI: 4 Agent (Duygu, Kategori, Çözüm, Yanıt) ve sıralı Task'lar; her task çıktısı sonrakine girdi",
+        "LangChain: her ajan için ayrı `ChatPromptTemplate`; çıktıların yapısını korumak için `PydanticOutputParser` veya basit `StrOutputParser`",
+        "Gemini: `ChatGoogleGenerativeAI` (model `gemini-1.5-pro` tercih edilir çünkü duygu ve kategori için daha başarılı)",
+        "Duygu Analisti çıktısı: duygu etiketi (1-5 öfke skoru), aciliyet (düşük/orta/yüksek), özet cümle",
+        "Kategori Uzmanı: önceden tanımlı kategoriler listesinden seçim + alt kategori serbest metin",
+        "Çözüm Mimarı: en az iki farklı çözüm önerisi ve her biri için gerekçe",
+        "Yanıt Yazarı: e-posta formatında (konu, selamlama, gövde, kapanış)",
+        "Çıktı: tüm adımların çıktılarını içeren JSON + son yanıt e-postası ayrıca Markdown dosyası",
+        "README: örnek şikayet metni, akış şeması, env değişkenleri",
+        "Test: mock LLM ile her ajanın beklenen şemada çıktı ürettiğini doğrula",
+        "İsteğe bağlı stretch: çözüm önerileri için harici bir API (örneğin ürün iade politikası sorgulama) entegrasyonu"
+      ],
+      "meta": {
+        "product_focus": "complaint_resolution_pipeline",
+        "pattern": "sequential_analysis_to_action",
+        "min_agents": 4,
+        "required_frameworks": ["crewai", "langchain"],
+        "required_llm": "google_gemini",
+        "langchain_integration": "Zincirleme prompt'lar ve yapılandırılmış parser ile ajan çıktılarının bir sonraki ajanın prompt'unda kullanılması",
+        "suggested_role_examples": ["duygu_analisti", "kategori_uzmani", "cozum_mimari", "yanit_yazari"],
+        "deliverables": ["requirements_lock", "complaint_schema", "sample_email_output.md", "readme_customer_support"],
+        "acceptance_smoke": "Örnek bir şikayet (`Ürün bozuk geldi, çok sinirliyim`) verildiğinde dört ajan da çalışır; son e-posta empatik ve çözüm odaklıdır.",
+        "non_goals_mvp": ["gerçek_ticket_sistemi", "müşteri_geçmişi", "çok_dilli_destek"]
+      }
+    },
+    {
+      "category": "practice",
+      "name": "Yaratıcı Senaryo Ekibi: Plot → Karakter → Diyalog → Editör (CrewAI + LangChain + Gemini)",
+      "description": "Kullanıcıdan bir tema veya logline alınır. Dört ajan ardışık çalışır: (1) Plot Mimarı – hikaye yapısı (3 perde, dönüm noktaları, çatışma) çıkarır, (2) Karakter Tasarımcısı – ana ve yan karakterlerin kişilik, motivasyon, kusurlarını yazar, (3) Diyalog Yazarı – belirlenen bir sahne için diyalog üretir (Plot ve Karakter çıktılarına dayanarak), (4) Editör – tüm çıktıları tutarlılık, akıcılık ve yaratıcılık açısından değerlendirir, düzeltmeler önerir. Gemini tüm yaratıcı yazma görevlerini üstlenir. LangChain, her ajanın çıktısını sonrakine taşımak için `RunnablePassthrough` veya basit değişken geçişi kullanır. Çıktı: JSON + okunabilir bir hikaye taslağı.",
+      "deadline_hours": 108,
+      "checklist": [
+        "Bağımlılıklar: `crewai`, `langchain`, `langchain-google-genai`",
+        "CrewAI: 4 Agent (Plot, Karakter, Diyalog, Editör) ve sıralı Task'lar; ara çıktılar geçici dosya veya bellek içinde tutulur",
+        "LangChain: `ChatPromptTemplate` ile her ajanın prompt'u; `itemgetter` veya `RunnablePassthrough` ile önceki ajan çıktılarını yeni prompt'a ekleme (LCEL kullanımı önerilir)",
+        "Gemini: `ChatGoogleGenerativeAI`; sıcaklık değeri 0.8-1.0 arası ayarlanabilir (yaratıcılık için)",
+        "Plot çıktısı: perde özetleri, ana çatışma, tema, hedef kitle",
+        "Karakter çıktısı: en az 2 ana karakter için ad, yaş, kişilik özellikleri, arzular, kusurlar",
+        "Diyalog Yazarı: yalnızca bir sahne (200-400 kelime) yazmalı, sahne bağlamını da belirtmeli",
+        "Editör: diyalog ve önceki çıktılar arasındaki tutarsızlıkları listelemeli, en az 3 iyileştirme önerisi sunmalı",
+        "Kullanıcı: tema veya logline dışında isteğe bağlı ek parametreler (tür, uzunluk) girebilir",
+        "Çıktı: tüm adım çıktılarını içeren bir JSON dosyası ve okunabilir Markdown dosyası (hikaye taslağı + diyalog + editör notları)",
+        "README: örnek çalıştırma (ör. 'Bir robotun insan olmayı öğrenmesi'), akış diyagramı",
+        "Test: mock LLM ile her ajanın kendinden öncekine bağımlı olduğunu ve editörün tutarsızlık bulduğunu doğrula",
+        "İsteğe bağlı stretch: kullanıcının editör önerilerini onaylayıp yeniden diyalog üretmesi"
+      ],
+      "meta": {
+        "product_focus": "creative_writing_team",
+        "pattern": "sequential_plot_character_dialogue_edit",
+        "min_agents": 4,
+        "required_frameworks": ["crewai", "langchain"],
+        "required_llm": "google_gemini",
+        "langchain_integration": "LCEL ile önceki ajan çıktılarının sonraki prompt'lara paslanması; `RunnablePassthrough.assign` kullanımı örneklenmeli",
+        "suggested_role_examples": ["plot_mimari", "karakter_tasarimci", "diyalog_yazari", "editor"],
+        "deliverables": ["requirements_lock", "story_output_schema", "sample_story.md", "readme_creative_team"],
+        "acceptance_smoke": "Bir tema verildiğinde 4 ajan sırayla çalışır; diyalog, plot ve karakter bilgileriyle tutarlıdır; editör en az bir tutarsızlık bildirir.",
+        "non_goals_mvp": ["görsel_üretim", "seslendirme", "tam_kitap_üretimi"]
+      }
+    }
+  ]
+}

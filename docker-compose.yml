@@ -1,0 +1,115 @@
+# Slack Community Agent — yerel / sunucu orkestasyonu
+#
+# Önkoşul: proje kökünde Slack + Postgres dahil tam `.env` (bkz. `.env.template`).
+# Compose, konteyner içinde `POSTGRES_HOST=postgres` ile `.env` içindeki host’u ezer.
+#
+# Varsayılan: postgres + migrate + challenge (Socket) + event (scheduler, --socket yok).
+# Aynı Slack app token ile ikinci bir Socket Mode süreci çalıştırmayın.
+#
+# Sadece özellik talebi süreci (challenge yok): docker compose --profile feature-standalone up -d
+#
+# Komutlar:
+#   docker compose up -d
+#   docker compose logs -f challenge
+#   docker compose down
+
+name: slack-community-agent
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16-bookworm
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-slack_community_agent}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-slack_community_agent}",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  migrate:
+    build:
+      context: .
+      dockerfile: services/challenge_service/Dockerfile
+    env_file:
+      - .env
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+    working_dir: /app
+    command: ["alembic", "upgrade", "head"]
+    restart: "no"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  challenge:
+    build:
+      context: .
+      dockerfile: services/challenge_service/Dockerfile
+    env_file:
+      - .env
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+    volumes:
+      - hf_cache:/home/appuser/.cache/huggingface
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  event:
+    build:
+      context: .
+      dockerfile: services/event_service/Dockerfile
+    env_file:
+      - .env
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+    # Dockerfile --socket verir; challenge zaten Socket tuttugu icin burada sadece scheduler (+ envanter handler kaydi).
+    command: ["python", "-m", "services.event_service"]
+    volumes:
+      - hf_cache:/home/appuser/.cache/huggingface
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  # Challenge ile ayni anda calistirma: iki process ayri Socket Mode acar (Slack app bunu desteklemez).
+  feature-request:
+    profiles: ["feature-standalone"]
+    build:
+      context: .
+      dockerfile: services/feature_request_service/Dockerfile
+    env_file:
+      - .env
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+    volumes:
+      - hf_cache:/home/appuser/.cache/huggingface
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  hf_cache:

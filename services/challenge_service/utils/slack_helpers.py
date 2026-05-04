@@ -32,12 +32,12 @@ class SlackHelper:
     _user_client_user_id: str | None = None
 
     @property
-    def _workspace_owner_id(self) -> str:
+    def _workspace_owner_id(self) -> Optional[str]:
         return get_settings().slack_workspace_owner_id
 
     @property
     def _admin_slack_id(self) -> str:
-        return get_settings().slack_admin_slack_id
+        return get_settings().slack_admin_slack_id or ""
 
     @property
     def bot_client(self):
@@ -105,8 +105,9 @@ class SlackHelper:
             bot_id = self.get_bot_user_id()
             if bot_id:
                 to_bootstrap.append(bot_id)
-            if self._workspace_owner_id != user_client_id:
-                to_bootstrap.append(self._workspace_owner_id)
+            owner_id = self._workspace_owner_id
+            if owner_id and owner_id != user_client_id:
+                to_bootstrap.append(owner_id)
             admin_id = self._admin_slack_id
             if admin_id and admin_id != user_client_id and admin_id not in to_bootstrap:
                 to_bootstrap.append(admin_id)

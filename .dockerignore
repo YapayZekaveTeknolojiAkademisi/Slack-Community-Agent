@@ -1,0 +1,12 @@
+.venv
+venv
+.env
+.git
+.github
+.cursor
+**/__pycache__
+**/*.py[cod]
+**/.pytest_cache
+**/logs
+*.md
+.DS_Store
