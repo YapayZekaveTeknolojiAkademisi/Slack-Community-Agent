@@ -149,4 +149,4 @@ Sonraki sürüme taşınacak değişiklikler. Eklerken mümkünse **`packages/..
 - **`README.md`:** Paketler, servisler, özellikler, kapsam ve sürüm notları bağlantısı.
 - **`CHANGELOG.md`:** Bu dosya — değişiklik geçmişi.
 - **`.env.template`:** `Settings` ile uyumlu ortam değişkeni şablonu.
-- **`requiremets.txt`:** Python bağımlılık listesi (proje kökü).
+- **`requirements.txt`:** Python bağımlılık listesi (proje kökü).

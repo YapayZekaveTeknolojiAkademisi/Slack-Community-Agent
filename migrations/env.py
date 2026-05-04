@@ -1,15 +1,33 @@
 """Alembic async environment — settings'ten URL alır, tüm modelleri yükler."""
+
 from __future__ import annotations
 
 import asyncio
 import os
 from logging.config import fileConfig
+from pathlib import Path
 
 from alembic import context
 from sqlalchemy.ext.asyncio import create_async_engine
 
-# Tüm ORM modellerini metadata'ya kaydetmek için base import ediyoruz.
 from packages.database.models.base import Base
+
+# .env dosyasını yükle (varsa) yoksa bu blok atlanır; override=False
+_env_path = Path(__file__).resolve().parents[1] / ".env"
+if _env_path.exists():
+    try:
+        from dotenv import load_dotenv
+
+        load_dotenv(dotenv_path=_env_path, override=False)
+    except ImportError:
+        # python-dotenv yoksa manuel parse et
+        with open(_env_path, encoding="utf-8") as _f:
+            for _line in _f:
+                _line = _line.strip()
+                if _line and not _line.startswith("#") and "=" in _line:
+                    _k, _, _v = _line.partition("=")
+                    os.environ.setdefault(_k.strip(), _v.strip())
+
 
 config = context.config
 target_metadata = Base.metadata
@@ -33,6 +51,7 @@ def _build_url() -> str:
     # 2. Ana settings (tüm .env dolu ise)
     try:
         from packages.settings import get_settings
+
         s = get_settings()
         return (
             f"postgresql+asyncpg://{s.username}:{s.password}"
@@ -42,17 +61,29 @@ def _build_url() -> str:
         pass
 
     # 3. POSTGRES_* env varları (template formatı)
-    user = os.environ["POSTGRES_USER"]
-    password = os.environ["POSTGRES_PASSWORD"]
+    user = os.environ.get("POSTGRES_USER")
+    password = os.environ.get("POSTGRES_PASSWORD")
     host = os.environ.get("POSTGRES_HOST", "localhost")
     port = os.environ.get("POSTGRES_PORT", "5432")
-    db = os.environ["POSTGRES_DB"]
+    db = os.environ.get("POSTGRES_DB")
+
+    if not user or not password or not db:
+        raise RuntimeError(
+            "Veritabanı bağlantı bilgileri eksik!\n"
+            "Şunlardan biri sağlanmalı:\n"
+            "  1. DATABASE_URL env var\n"
+            "  2. packages.settings üzerinden (get_settings listeye bakın)\n"
+            "  3. POSTGRES_USER + POSTGRES_PASSWORD + POSTGRES_DB env vars\n"
+            f"Mevcut: POSTGRES_USER={user!r}, POSTGRES_DB={db!r}, .env yolu={_env_path}"
+        )
+
     return f"postgresql+asyncpg://{user}:{password}@{host}:{port}/{db}"
 
 
 # ---------------------------------------------------------------------------
 # Offline mode — SQL script üretir, DB'ye bağlanmaz
 # ---------------------------------------------------------------------------
+
 
 def run_migrations_offline() -> None:
     context.configure(
@@ -69,6 +100,7 @@ def run_migrations_offline() -> None:
 # ---------------------------------------------------------------------------
 # Online mode — gerçek async bağlantıyla çalışır
 # ---------------------------------------------------------------------------
+
 
 def _do_run_migrations(connection) -> None:
     context.configure(

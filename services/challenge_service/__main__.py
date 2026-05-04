@@ -22,6 +22,7 @@ import threading
 from packages.database.manager import db
 from packages.slack.client import slack_client
 from services.challenge_service import handlers as _handlers  # noqa: F401 — handler kayıtları aktive edilir
+from services.feature_request_service import handlers as _fr_handlers  # noqa: F401 — feature_request handler'ları shared socket mode'a kaydedilir
 from services.challenge_service.core.event_loop import set_loop
 from services.challenge_service.logger import _logger
 from services.challenge_service.manager import StartupMode, service_manager

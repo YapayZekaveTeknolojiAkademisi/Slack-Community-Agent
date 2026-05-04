@@ -15,6 +15,7 @@ Kullanım:
   python migrate.py stamp <rev>      # migration çalıştırmadan revision işaretle
   python migrate.py sql              # upgrade SQL'ini ekrana bas (offline)
 """
+
 from __future__ import annotations
 
 import sys
@@ -61,7 +62,9 @@ def main() -> None:
 
     elif cmd == "autogenerate":
         if len(args) < 2:
-            print("Hata: mesaj gerekli.\n  python migrate.py autogenerate 'kısa açıklama'")
+            print(
+                "Hata: mesaj gerekli.\n  python migrate.py autogenerate 'kısa açıklama'"
+            )
             sys.exit(1)
         message = args[1]
         print(f"🔍 Model farkından migration üretiliyor: {message!r}")
