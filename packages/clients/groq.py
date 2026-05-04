@@ -20,11 +20,11 @@ HATA YÖNETİMİ
 """
 
 import asyncio
-import logging
 from typing import Optional
 
 from groq import AsyncGroq
 
+from packages.logger.manager import get_logger
 from packages.settings import get_settings
 
 
@@ -57,7 +57,7 @@ class GroqClient(metaclass=_SingletonMeta):
     DEFAULT_TEMPERATURE = 0.3
 
     def __init__(self) -> None:
-        self._logger = logging.getLogger("groq_client")
+        self._logger = get_logger("packages.clients.groq")
         settings = get_settings()
         api_key = settings.groq_api_key
         if not api_key:

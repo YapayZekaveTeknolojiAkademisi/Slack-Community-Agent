@@ -5,9 +5,9 @@ Başlatma: python -m services.feature_request_service
 
 import asyncio, signal, sys, threading
 
+from services.feature_request_service.logger import _logger  # noqa: F401 — start_logging (önce)
 from packages.database.manager import db
 from packages.slack.client import slack_client
-from services.feature_request_service.logger import _logger
 from services.feature_request_service import handlers as _handlers  # noqa: F401
 from services.feature_request_service.core.event_loop import set_loop
 from services.feature_request_service.manager import service_manager

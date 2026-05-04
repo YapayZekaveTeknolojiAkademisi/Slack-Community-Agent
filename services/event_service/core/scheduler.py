@@ -1,7 +1,7 @@
 """
 Event Service — Background scheduler.
 Periyodik gorevler:
-  1. Timeout: PENDING + 72 saat → REJECTED
+  1. Timeout: PENDING + event_approval_timeout_hours (varsayilan 72 saat) → REJECTED
   2. Gun basi hatirlatma: O gunun etkinliklerini duyur
   3. 10dk oncesi hatirlatma
   4. COMPLETED gecisi: Tarihi gecmis APPROVED → COMPLETED
@@ -70,7 +70,7 @@ class EventScheduler:
                 _logger.error("[SCHED] Error in loop: %s", e, exc_info=True)
             await asyncio.sleep(60)
 
-    # ---- 1. Timeout: PENDING + 72 saat → REJECTED ----
+    # ---- 1. Timeout: PENDING + event_approval_timeout_hours → REJECTED ----
 
     async def _check_pending_timeout(self) -> None:
         s = get_settings()

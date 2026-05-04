@@ -14,6 +14,14 @@ from packages.database.models.event import Event, LocationType
 from ..logger import _logger
 
 
+def _admin_email_recipients() -> list[str]:
+    """ADMIN_EMAIL virgülle ayrılmış olabilir — EmailMessage ``to`` alanı list[str] bekler."""
+    raw = (get_settings().admin_email or "").strip()
+    if not raw:
+        return []
+    return [x.strip() for x in raw.split(",") if x.strip()]
+
+
 def _get_smtp() -> SmtpClient | None:
     """SMTP client'i doner, devre disiysa None."""
     if not get_settings().smtp_enabled:
@@ -74,9 +82,9 @@ async def _resolve_email_async(slack_id: str) -> str | None:
 
 def send_admin_notification(event: Event) -> None:
     """Admin'e yeni etkinlik talebi e-postasi gonderir."""
-    s = get_settings()
     smtp = _get_smtp()
-    if not smtp or not s.admin_email:
+    admin_to = _admin_email_recipients()
+    if not smtp or not admin_to:
         return
     try:
         loc_label = _location_label(event)
@@ -92,8 +100,8 @@ def send_admin_notification(event: Event) -> None:
             f"YZTA Talep: {event.yzta_request or '—'}\n"
             f"Talep Eden: {event.creator_slack_id}\n"
         )
-        schema = EmailSchema(to=s.admin_email, subject=subject, body=body)
-        smtp.send(schema)
+        msg = EmailMessage(to=admin_to, subject=subject, body=body)
+        smtp.send(msg)
     except Exception as e:
         _logger.error("[EVT-EMAIL] Admin bildirimi gonderilemedi: %s", e)
 
@@ -155,8 +163,8 @@ async def send_reminder_email_async(slack_id: str, event: Event, reminder_type: 
             f"Süre: {event.duration_minutes} dakika\n"
             f"Link: {event.link or '—'}\n"
         )
-        schema = EmailSchema(to=user_email, subject=subject, body=body)
-        smtp.send(schema)
+        msg = EmailMessage(to=[user_email], subject=subject, body=body)
+        smtp.send(msg)
     except Exception as e:
         _logger.error("[EVT-EMAIL] Hatırlatma gönderilemedi: %s", e)
 
@@ -187,8 +195,8 @@ def _send_status_email(smtp: SmtpClient, user_email: str, event: Event, status: 
         )
         if admin_note:
             body += f"Admin Notu: {admin_note}\n"
-        schema = EmailSchema(to=user_email, subject=subject, body=body)
-        smtp.send(schema)
+        msg = EmailMessage(to=[user_email], subject=subject, body=body)
+        smtp.send(msg)
     except Exception as e:
         _logger.error("[EVT-EMAIL] Kullanıcı bildirimi gönderilemedi: %s", e)
 
@@ -201,8 +209,8 @@ def _send_cancellation(smtp: SmtpClient, user_email: str, event: Event) -> None:
             f"Tarih: {event.date} {event.time}\n"
             f"Bu etkinlik iptal edilmiştir.\n"
         )
-        schema = EmailSchema(to=user_email, subject=subject, body=body)
-        smtp.send(schema)
+        msg = EmailMessage(to=[user_email], subject=subject, body=body)
+        smtp.send(msg)
     except Exception as e:
         _logger.error("[EVT-EMAIL] İptal bildirimi gönderilemedi: %s", e)
 
@@ -217,7 +225,7 @@ def _send_update(smtp: SmtpClient, user_email: str, event: Event) -> None:
             f"Link: {event.link or '—'}\n"
             f"Etkinlik bilgileri güncellenmiştir. Detaylar için Slack kanalını kontrol edin.\n"
         )
-        schema = EmailSchema(to=user_email, subject=subject, body=body)
-        smtp.send(schema)
+        msg = EmailMessage(to=[user_email], subject=subject, body=body)
+        smtp.send(msg)
     except Exception as e:
         _logger.error("[EVT-EMAIL] Guncelleme bildirimi gonderilemedi: %s", e)

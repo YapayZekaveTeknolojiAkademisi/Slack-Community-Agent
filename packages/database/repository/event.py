@@ -1,10 +1,18 @@
 from __future__ import annotations
 
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, timedelta
+from zoneinfo import ZoneInfo
+
 from sqlalchemy import select, func
 
 from packages.database.models.event import Event, EventInterest, EventStatus
 from packages.database.repository.base import BaseRepository
+from packages.settings import get_settings
+
+
+def _today_in_event_timezone() -> date:
+    tz = ZoneInfo(get_settings().event_timezone)
+    return datetime.now(tz).date()
 
 
 class EventRepository(BaseRepository[Event]):
@@ -27,7 +35,7 @@ class EventRepository(BaseRepository[Event]):
 
     async def list_current_month(self) -> list[Event]:
         """Bu ayin APPROVED etkinliklerini doner."""
-        today = datetime.now(timezone.utc).date()
+        today = _today_in_event_timezone()
         first_day = today.replace(day=1)
         if today.month == 12:
             last_day = today.replace(year=today.year + 1, month=1, day=1)
@@ -96,7 +104,7 @@ class EventRepository(BaseRepository[Event]):
         /event add_me formu icin: onumuzdeki N gun icindeki APPROVED etkinlikleri
         doner, ancak kullanicinin daha once ilgi gostermedigi etkinlikleri filtreler.
         """
-        today = datetime.now(timezone.utc).date()
+        today = _today_in_event_timezone()
         end_date = today + timedelta(days=days_ahead)
 
         # Kullanicinin ilgi gosterdigi event ID'leri (subquery)

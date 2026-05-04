@@ -2,20 +2,19 @@
 /cemilimyapar ve /cemil-report slash komut handler'ları.
 """
 
-import logging
-
 from packages.database.manager import db
 from packages.settings import get_settings
 from packages.slack.blocks.layouts import Layouts
 from packages.slack.client import slack_client
 from services.feature_request_service.core.event_loop import run_async
+from services.feature_request_service.logger import get_logger
 from services.feature_request_service.service import FeatureRequestService
 from services.feature_request_service.utils.notifications import (
     NotificationType,
     send_notification,
 )
 
-logger = logging.getLogger("feature_request_service.handlers.commands")
+logger = get_logger("feature_request_service.handlers.commands")
 app = slack_client.app
 _service = None
 

@@ -24,9 +24,8 @@ DÖNÜŞ TİPLERİ (submit_request)
   {"status": "quota_exceeded",  "used": 2, "max": 2}
 """
 
-import logging
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import hdbscan
@@ -39,19 +38,16 @@ from packages.database.repository.feature_request import (
     FeatureClusterLabelRepository,
     FeatureRequestRepository,
 )
+from packages.settings import get_settings
 from packages.vector import VectorClient
+from services.feature_request_service.logger import get_logger
 from services.feature_request_service.utils.notifications import (
     NotificationType,
     send_notification,
 )
 
-# Constants
-
-WEEKLY_QUOTA = 2
-SIMILARITY_THRESHOLD_WARNING = 0.80
-SIMILARITY_THRESHOLD_EXACT = 0.90
-FRAUD_THRESHOLD = 0.90
-FRAUD_WINDOW_DAYS = 7
+# None ise batch büyüklüğüne göre dinamik hesaplama kullanılır.
+# Kalibrasyon tamamlanınca buraya ClusteringParams(...) değeri girilir.
 
 
 @dataclass
@@ -73,8 +69,6 @@ class ClusteringParams:
         return cls(min_cluster_size, min_samples, n_components, n_neighbors)
 
 
-# None ise batch büyüklüğüne göre dinamik hesaplama kullanılır.
-# Kalibrasyon tamamlanınca buraya ClusteringParams(...) değeri girilir.
 FIXED_CLUSTERING_PARAMS: ClusteringParams | None = None
 
 
@@ -86,7 +80,7 @@ class FeatureRequestService:
     """
 
     def __init__(self, db_manager) -> None:
-        self.logger = logging.getLogger("feature_request_service.FeatureRequestService")
+        self.logger = get_logger("feature_request_service.service")
         self.vector_client = VectorClient()
         self.groq_client = GroqClient()
         self.db = db_manager
@@ -104,7 +98,7 @@ class FeatureRequestService:
         5. DB'ye kaydet → `created` döndür.
 
         Args:
-            user_id:  Talebi gönderen kullanıcının DB id'si (users.id).
+            user_id: Slack kullanıcı ID'si (`slack_users.slack_id`).
             raw_text: Modal'dan gelen ham talep metni.
 
         Returns:
@@ -121,14 +115,19 @@ class FeatureRequestService:
             await slack_repo.get_or_create(slack_id=user_id)
 
             repo = FeatureRequestRepository(session)
+            cfg = get_settings()
 
             # 1. Haftalık hak kontrolü
             used = await self.check_weekly_quota(user_id, repo)
-            if used >= WEEKLY_QUOTA:
+            if used >= cfg.feature_request_weekly_quota:
                 self.logger.info(
                     "Haftalık kota aşıldı.", extra={"user_id": user_id, "used": used}
                 )
-                return {"status": "quota_exceeded", "used": used, "max": WEEKLY_QUOTA}
+                return {
+                    "status": "quota_exceeded",
+                    "used": used,
+                    "max": cfg.feature_request_weekly_quota,
+                }
 
             # 2. Embed
             try:
@@ -150,7 +149,7 @@ class FeatureRequestService:
                 user_id, vector, repo
             )
             if similar_record is not None:
-                if similarity_score >= SIMILARITY_THRESHOLD_EXACT:
+                if similarity_score >= cfg.feature_request_similarity_exact:
                     self.logger.info(
                         "Birebir aynı (exact match) kayıt bulundu.",
                         extra={
@@ -164,7 +163,7 @@ class FeatureRequestService:
                         "existing_id": similar_record.id,
                         "existing_text": similar_record.request_raw,
                     }
-                elif similarity_score >= SIMILARITY_THRESHOLD_WARNING:
+                elif similarity_score >= cfg.feature_request_similarity_warning:
                     self.logger.info(
                         "Benzer kayıt bulundu (gri alan).",
                         extra={
@@ -312,12 +311,12 @@ class FeatureRequestService:
         Kullanıcının bu hafta kaç submit kullandığını döndürür.
 
         Args:
-            user_id: Sorgulanacak kullanıcının DB id'si.
+            user_id: Sorgulanacak kullanıcının Slack ID'si.
             repo:    Opsiyonel — halihazırda açık bir session varsa inject edilir.
                      None ise yeni session açılır.
 
         Returns:
-            Kullanılan submit sayısı (int). WEEKLY_QUOTA ile karşılaştırılmalı.
+            Kullanılan submit sayısı (int). `get_settings().feature_request_weekly_quota` ile karşılaştırılmalı.
         """
         if repo is not None:
             records = await repo.list_by_user_this_week(user_id)
@@ -340,7 +339,7 @@ class FeatureRequestService:
         ve en yüksek benzerlik skoruna sahip kaydı ile skorunu döner.
 
         Args:
-            user_id:    Arama yapılacak kullanıcının DB id'si.
+            user_id:    Arama yapılacak kullanıcının Slack ID'si.
             new_vector: Yeni talebin embedding vektörü.
             repo:       Opsiyonel inject edilmiş repository.
 
@@ -395,7 +394,7 @@ class FeatureRequestService:
         repo: FeatureRequestRepository | None = None,
     ) -> float:
         """
-        Farklı kullanıcılardan gelen son 7 günlük talep vektörleriyle
+        Farklı kullanıcılardan gelen rolling penceredeki embedded taleplerle
         new_vector'ü karşılaştırır ve bir fraud_score üretir.
 
         Fraud score = benzer kayıt sayısı / toplam karşılaştırılan kayıt sayısı.
@@ -409,29 +408,27 @@ class FeatureRequestService:
         Returns:
             0.0–1.0 arası fraud skoru.
         """
-        # Son 7 günlük embedded kaydı çek (kendi kayıtları hariç)
+        cfg = get_settings()
+        days = cfg.feature_request_rolling_window_days
+        since = datetime.now(timezone.utc) - timedelta(days=days)
         if repo is not None:
-            all_embedded = await repo.list_by_status("embedded")
+            others = await repo.list_embedded_others_since(user_id, since)
         else:
             async with self.db.session() as session:
-                all_embedded = await FeatureRequestRepository(session).list_by_status(
-                    "embedded"
-                )
+                others = await FeatureRequestRepository(
+                    session
+                ).list_embedded_others_since(user_id, since)
 
-        others = [
-            r
-            for r in all_embedded
-            if r.user_id != user_id and r.request_embedded is not None
-        ]
         if not others:
             return 0.0
 
         similar_count = 0
+        fraud_thresh = cfg.feature_request_fraud_threshold
         for record in others:
             try:
                 other_vec = np.array(record.request_embedded, dtype=np.float32)
                 similarity = self.vector_client.cosine_similarity(new_vector, other_vec)
-                if similarity >= FRAUD_THRESHOLD:
+                if similarity >= fraud_thresh:
                     similar_count += 1
             except Exception:
                 continue
@@ -761,6 +758,8 @@ class FeatureRequestService:
         async with self.db.session() as session:
             fr_repo = FeatureRequestRepository(session)
             fcl_repo = FeatureClusterLabelRepository(session)
+            cfg = get_settings()
+            fraud_thresh = cfg.feature_request_fraud_threshold
 
             if is_preview and preview_data:
                 clustered = preview_data.get("preview_records", [])
@@ -822,7 +821,7 @@ class FeatureRequestService:
                 fraud_flagged = [
                     r
                     for r in records
-                    if r.fraud_score and r.fraud_score > FRAUD_THRESHOLD
+                    if r.fraud_score and r.fraud_score > fraud_thresh
                 ]
                 fraud_note = (
                     f"\n   ⚠️ {len(fraud_flagged)} fraud şüpheli kayıt."
@@ -940,6 +939,7 @@ class FeatureRequestService:
 
     async def retry_failed_embeddings(self) -> None:
         """status='embedding_failed' olan kayıtları bulup tekrar embed etmeye çalışır."""
+        await self.cleanup_stale_pending_requests()
         async with self.db.session() as session:
             repo = FeatureRequestRepository(session)
             failed_records = await repo.list_by_status("embedding_failed")
@@ -961,8 +961,10 @@ class FeatureRequestService:
                 f"Embedding retry bitti: {success_count}/{len(failed_records)} kayıt kurtarıldı."
             )
 
-    async def cleanup_stale_pending_requests(self, hours: int = 24) -> None:
+    async def cleanup_stale_pending_requests(self, hours: int | None = None) -> None:
         """Belirtilen saat süresinin dışına çıkmış çürük pending_bypass kayıtlarını siler."""
+        if hours is None:
+            hours = get_settings().feature_request_pending_bypass_cleanup_hours
         async with self.db.session() as session:
             repo = FeatureRequestRepository(session)
             deleted_count = await repo.delete_stale_pending_bypass(hours=hours)

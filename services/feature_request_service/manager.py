@@ -1,15 +1,15 @@
 """Feature Request Service Manager — Singleton orkestratör."""
 
-import logging
 from typing import Optional
 
 from packages.database.manager import db
 from services.feature_request_service.core.monitor.feature_monitor import (
     FeatureRequestMonitor,
 )
+from services.feature_request_service.logger import get_logger
 from services.feature_request_service.service import FeatureRequestService
 
-_logger = logging.getLogger("feature_request_service.manager")
+_logger = get_logger("feature_request_service.manager")
 
 
 class FeatureRequestServiceManager:

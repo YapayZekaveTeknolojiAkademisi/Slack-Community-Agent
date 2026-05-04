@@ -28,7 +28,7 @@ from .core.monitor.evaluation_monitor import EvaluationMonitor
 from .utils.slack_helpers import slack_helper
 
 
-# FRESH: tüm tabloları sil (challenges, team_members, jury_members, submissions) — tam sıfırlama
+# FRESH: tüm ilgili challenge satırlarını sil (challenges, team_members, jury_members) — tam sıfırlama
 # RESUME: sadece NOT_STARTED temizlenir (takım oluşumu yarıda kaldı, bellek durumu kayıp)
 #         STARTED / COMPLETED / IN_EVALUATION / EVALUATION_DELAYED → DB'de kalır, registry rebuild eder
 #         EVALUATED / NOT_COMPLETED geçmişi RESUME modda korunur

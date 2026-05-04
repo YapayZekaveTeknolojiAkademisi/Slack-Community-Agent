@@ -1,7 +1,8 @@
-import logging
 from enum import Enum, auto
 
-logger = logging.getLogger("feature_request_service.notifications")
+from services.feature_request_service.logger import get_logger
+
+logger = get_logger("feature_request_service.notifications")
 
 class NotificationType(Enum):
     ACTION_RESULT = auto()

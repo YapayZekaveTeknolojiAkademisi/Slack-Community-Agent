@@ -1,10 +1,13 @@
 """Embedding retry, clustering ve raporlama periyodik görevleri."""
 
 import asyncio
-import logging
 from datetime import datetime, time, timedelta
+from zoneinfo import ZoneInfo
 
-_logger = logging.getLogger("feature_request_service.monitor")
+from packages.settings import get_settings
+from services.feature_request_service.logger import get_logger
+
+_logger = get_logger("feature_request_service.monitor")
 
 
 class FeatureRequestMonitor:
@@ -12,6 +15,10 @@ class FeatureRequestMonitor:
         self._svc = service
         self._tasks: list[asyncio.Task] = []
         self._running = False
+
+    def _local_now(self) -> datetime:
+        tz = ZoneInfo(get_settings().event_timezone)
+        return datetime.now(tz)
 
     async def start(self):
         self._running = True
@@ -21,32 +28,59 @@ class FeatureRequestMonitor:
 
             VectorClient().unload_if_idle()
 
+        s = get_settings()
         self._tasks = [
             asyncio.create_task(
                 self._daily(
-                    time(3, 0), self._svc.retry_failed_embeddings, "embed_retry"
+                    time(s.feature_request_embed_retry_hour, s.feature_request_embed_retry_minute),
+                    self._svc.retry_failed_embeddings,
+                    "embed_retry",
                 )
             ),
             asyncio.create_task(
                 self._weekly(
-                    2, time(2, 0), self._svc.check_clustering_failed, "clust_fail_wed"
+                    s.feature_request_clustering_weekday,
+                    time(
+                        s.feature_request_cluster_fail_before_pipeline_hour,
+                        s.feature_request_cluster_fail_before_pipeline_minute,
+                    ),
+                    self._svc.check_clustering_failed,
+                    "clust_fail_wed",
                 )
             ),
             asyncio.create_task(
                 self._weekly(
-                    2, time(3, 0), self._svc.run_clustering_pipeline, "clust_wed"
+                    s.feature_request_clustering_weekday,
+                    time(s.feature_request_clustering_hour, s.feature_request_clustering_minute),
+                    self._svc.run_clustering_pipeline,
+                    "clust_wed",
                 )
             ),
             asyncio.create_task(
                 self._weekly(
-                    5, time(9, 0), self._svc.check_clustering_failed, "clust_fail_sat"
+                    s.feature_request_report_weekday,
+                    time(
+                        s.feature_request_cluster_fail_before_report_hour,
+                        s.feature_request_cluster_fail_before_report_minute,
+                    ),
+                    self._svc.check_clustering_failed,
+                    "clust_fail_sat",
                 )
             ),
             asyncio.create_task(
-                self._weekly(5, time(10, 0), self._svc.send_weekly_report, "report_sat")
+                self._weekly(
+                    s.feature_request_report_weekday,
+                    time(s.feature_request_report_hour, s.feature_request_report_minute),
+                    self._svc.send_weekly_report,
+                    "report_sat",
+                )
             ),
             asyncio.create_task(
-                self._periodic(900, _check_vector_idle, "vector_idle_check")
+                self._periodic(
+                    s.feature_request_vector_idle_interval_seconds,
+                    _check_vector_idle,
+                    "vector_idle_check",
+                )
             ),
         ]
         _logger.info("[Monitor] %d görev başlatıldı", len(self._tasks))
@@ -73,8 +107,8 @@ class FeatureRequestMonitor:
 
     async def _daily(self, target: time, job, name: str):
         while self._running:
-            now = datetime.now()
-            nxt = datetime.combine(now.date(), target)
+            now = self._local_now()
+            nxt = datetime.combine(now.date(), target, tzinfo=now.tzinfo)
             if nxt <= now:
                 nxt += timedelta(days=1)
             try:
@@ -88,13 +122,13 @@ class FeatureRequestMonitor:
                 await asyncio.sleep(60)
 
     async def _weekly(self, dow: int, target: time, job, name: str):
-        """dow: 0=Mon ... 6=Sun"""
+        """dow: 0=Mon ... 6=Sun — saatler event_timezone ile yorumlanir."""
         while self._running:
-            now = datetime.now()
+            now = self._local_now()
             days = (dow - now.weekday()) % 7
             if days == 0 and now.time() >= target:
                 days = 7
-            nxt = datetime.combine(now.date() + timedelta(days=days), target)
+            nxt = datetime.combine(now.date() + timedelta(days=days), target, tzinfo=now.tzinfo)
             try:
                 await asyncio.sleep((nxt - now).total_seconds())
                 if self._running:

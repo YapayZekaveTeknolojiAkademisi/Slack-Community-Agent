@@ -1,7 +1,7 @@
 """Add event tables
 
 Revision ID: 0003
-Revises: 0002_add_slack_id_to_members
+Revises: 0002
 Create Date: 2026-04-08
 """
 from alembic import op
@@ -9,7 +9,7 @@ import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import JSONB
 
 revision = "0003"
-down_revision = "0002_add_slack_id_to_members"
+down_revision = "0002"
 branch_labels = None
 depends_on = None
 

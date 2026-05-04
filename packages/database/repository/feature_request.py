@@ -16,20 +16,22 @@ METODLAR
     increment_report_count(cluster_id) → Etiketin raporlanma sayısını bir artırır.
 """
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import select, update
 
 from packages.database.models.feature_request import FeatureClusterLabel, FeatureRequest
 from packages.database.repository.base import BaseRepository
+from packages.settings import get_settings
 
 
 class FeatureRequestRepository(BaseRepository[FeatureRequest]):
     model = FeatureRequest
 
     async def list_by_user_this_week(self, user_id: str) -> list[FeatureRequest]:
-        """Kullanıcının son 7 gün içinde eklediği geçerli (kota düşen) talepleri listeler."""
-        week_ago = datetime.utcnow() - timedelta(days=7)
+        """Kullanıcının rolling pencerede eklediği geçerli (kota düşen) talepleri listeler."""
+        days = get_settings().feature_request_rolling_window_days
+        week_ago = datetime.now(timezone.utc) - timedelta(days=days)
         result = await self.session.execute(
             select(FeatureRequest)
             .where(FeatureRequest.user_id == user_id)
@@ -58,17 +60,31 @@ class FeatureRequestRepository(BaseRepository[FeatureRequest]):
 
     async def list_embedded_vectors(self, user_id: str) -> list[FeatureRequest]:
         """
-        Kullanıcının son 7 gün içinde eklediği ve başarılı bir şekilde
+        Kullanıcının rolling pencerede eklediği ve başarılı şekilde
         vektörleştirilmiş kayıtlarını onaylanmış statülere göre listeler.
         Benzerlik (similarity) kontrolü vb. için kullanılır.
         """
-        week_ago = datetime.utcnow() - timedelta(days=7)
+        days = get_settings().feature_request_rolling_window_days
+        week_ago = datetime.now(timezone.utc) - timedelta(days=days)
         result = await self.session.execute(
             select(FeatureRequest)
             .where(FeatureRequest.user_id == user_id)
             .where(FeatureRequest.created_at >= week_ago)
             .where(FeatureRequest.request_embedded.is_not(None))
             .where(FeatureRequest.status.in_(["embedded", "clustered", "reported"]))
+        )
+        return list(result.scalars().all())
+
+    async def list_embedded_others_since(
+        self, exclude_user_id: str, since: datetime
+    ) -> list[FeatureRequest]:
+        """Baskalarinin belirtilen tarihten sonraki embedded talepleri (fraud karsilastirmasi)."""
+        result = await self.session.execute(
+            select(FeatureRequest)
+            .where(FeatureRequest.user_id != exclude_user_id)
+            .where(FeatureRequest.status == "embedded")
+            .where(FeatureRequest.created_at >= since)
+            .where(FeatureRequest.request_embedded.is_not(None))
         )
         return list(result.scalars().all())
 
@@ -114,7 +130,7 @@ class FeatureRequestRepository(BaseRepository[FeatureRequest]):
         """Belirtilen saatten eski olan pending_bypass kayıtlarını donanım (hard) siler."""
         from sqlalchemy import delete as sql_delete
 
-        cutoff = datetime.utcnow() - timedelta(hours=hours)
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
         result = await self.session.execute(
             sql_delete(FeatureRequest)
             .where(FeatureRequest.status == "pending_bypass")

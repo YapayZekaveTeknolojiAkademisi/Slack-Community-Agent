@@ -25,12 +25,12 @@ import signal
 import sys
 import threading
 
+from services.event_service.logger import _logger  # noqa: F401 — start_logging (önce)
 from packages.database.manager import db
 from packages.slack.client import slack_client
 from services.event_service import handlers as _handlers  # noqa: F401 — handler kayitlari aktive edilir
 from services.event_service.core.event_loop import set_loop
 from services.event_service.core.scheduler import event_scheduler
-from services.event_service.logger import _logger
 
 
 # ---------------------------------------------------------------------------

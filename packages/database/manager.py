@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import logging
 from logging import Logger
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator
@@ -14,10 +13,23 @@ _s = get_settings()
 
 
 class DatabaseManager:
-    def __init__(self, logger: Logger) -> None:
-        self._logger = logger
+    """
+    Logger, ``start_logging`` sonrası ilk kullanımda ``packages.logger.manager.get_logger``
+    ile bağlanır (servis girişinde db genelde logger'dan önce import edilir).
+    """
+
+    def __init__(self) -> None:
+        self._logger_cache: Logger | None = None
         self._engine: AsyncEngine | None = None
         self._sessionmaker: async_sessionmaker[AsyncSession] | None = None
+
+    @property
+    def _logger(self) -> Logger:
+        if self._logger_cache is None:
+            from packages.logger.manager import get_logger
+
+            self._logger_cache = get_logger("packages.database")
+        return self._logger_cache
 
     def _create_database_url(self) -> str:
         return f"postgresql+asyncpg://{_s.username}:{_s.password}@{_s.host}:{_s.port}/{_s.database}"
@@ -71,4 +83,4 @@ class DatabaseManager:
         self._logger.info("SqlAlchemy Engine & Sessionmaker shutdown")
 
 
-db = DatabaseManager(logging.getLogger("packages.database"))
+db = DatabaseManager()
