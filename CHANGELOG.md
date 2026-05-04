@@ -12,9 +12,14 @@ Sonraki sürüme taşınacak değişiklikler. Eklerken mümkünse **`packages/..
 
 #### Dağıtım (Docker)
 
-- **`docker-compose.yml`:** `postgres` (pgvector/pg16), tek seferlik **`migrate`** (`alembic upgrade head`), **`challenge`**, **`event`** (varsayılan CMD override ile Socket kapalı scheduler), `pgdata` ve `hf_cache` volume’ları; **`feature-request`** servisi `feature-standalone` profili ile (challenge ile aynı anda Socket açmamak için ayrıldı).
+- **`docker-compose.yml`:** `postgres` (pgvector/pg16), tek seferlik **`migrate`** (`alembic upgrade head`), **`challenge`**, **`event`** (varsayılan CMD override ile Socket kapalı scheduler), `pgdata` ve `hf_cache` volume’ları; profilli ek süreçler: **`feature-request`** (`feature-standalone`), **`english`** (`english-standalone`), **`summary`** (`summary-standalone`) — aynı Slack app token ile birden fazla Socket Mode birlikte çalıştırılmamalı.
 - **`.dockerignore`:** İmaj boyutunu düşürmek için `.venv`, `.git`, `logs` vb. hariç tutuldu.
-- **`services/challenge_service/Dockerfile`**, **`services/event_service/Dockerfile`**, **`services/feature_request_service/Dockerfile`:** Proje kökünden build; Python 3.12 slim, `libgomp1` / `build-essential`, ortak `requirements.txt` ve `PYTHONPATH=/app`; çalışma kullanıcısı `appuser` (uid 1000).
+- **`Makefile`:** `docker compose` kısayolları — `up` / `up-build`, `down` / `down-v`, `logs` (`S=` ile servis seçimi), `migrate`, `shell-challenge`, `up-feature` / `up-english` / `up-summary`, `check`, `config`, `build` / `rebuild`, `pull`, `ps`; `COMPOSE=` ile farklı compose binary’si.
+- **`services/challenge_service/Dockerfile`**, **`services/event_service/Dockerfile`**, **`services/feature_request_service/Dockerfile`**, **`services/english_service/Dockerfile`**, **`services/summary_service/Dockerfile`:** Proje kökünden build; Python 3.12 slim, `libgomp1` / `build-essential`, ortak `requirements.txt` ve `PYTHONPATH=/app`; çalışma kullanıcısı `appuser` (uid 1000).
+
+#### Dokümantasyon (kök)
+
+- **`DEPLOYMENT.md`:** Compose tabanlı dağıtım rehberi — bileşen haritası, ortam / `x-db-env`, `make` ve doğrudan `docker compose` komutları, migrasyon, Socket Mode ve profil uyarıları, kısa üretim notları.
 
 #### `services/challenge_service`
 
@@ -23,10 +28,11 @@ Sonraki sürüme taşınacak değişiklikler. Eklerken mümkünse **`packages/..
 #### `packages/settings`
 
 - **Feature Request** yapılandırması: kota, rolling pencere günü, benzerlik / fraud eşikleri, `pending_bypass` temizlik saati, vektör idle aralığı, günlük embed-retry ve haftalık kümeleme / rapor zamanları (`event_timezone` ile uyumlu monitör yorumları için); `feature_request_similarity_exact >= feature_request_similarity_warning` doğrulaması.
+- **`groq_model`:** Groq model adı (`GROQ_MODEL` / `groq_model`); servislerde LLM çağrılarında seçilebilir model.
 
 #### `.env.template`
 
-- `EVENT_CHANNEL`, LLM anahtarları (`GROQ_API_KEY`, `GEMINI_API_KEY`, `HF_TOKEN`), Feature Request ve Event opsiyonel env satırları genişletildi / hizalandı.
+- `EVENT_CHANNEL`, LLM anahtarları (`GROQ_API_KEY`, `GEMINI_API_KEY`, `HF_TOKEN`), `GROQ_MODEL`, Feature Request ve Event opsiyonel env satırları genişletildi / hizalandı.
 
 ### Changed
 
@@ -43,6 +49,16 @@ Sonraki sürüme taşınacak değişiklikler. Eklerken mümkünse **`packages/..
 
 - **`service.py`:** Kota, benzerlik ve tutarlılık eşikleri, fraud penceresi ve rapor notları `get_settings()` üzerinden; `detect_fraud` rolling pencerede diğer kullanıcıların `embedded` kayıtlarıyla sınırlı; `cleanup_stale_pending_requests(None)` ayardaki saatleri kullanır; `retry_failed_embeddings` öncesi esnek `pending_bypass` temizliği.
 - **`core/monitor/feature_monitor.py`:** Tüm zamanlamalar `get_settings()` alanlarından; günlük/haftalık tetikleyiciler `event_timezone` (`ZoneInfo`) ile yorumlanıyor.
+
+#### `services/english_service`
+
+- **`logger.py`:** `packages.logger` ile hizalama; **`llm/client.py`**, handler’lar, **`quiz_mode.py`**, **`writing_analyzer.py`** içinde `get_settings()` ve servis logger’ı (`_logger`) kullanımı.
+- **`__main__.py`:** Logger kurulum sırası diğer import’lardan önce gelecek şekilde düzenlendi.
+
+#### `services/summary_service`
+
+- **`__main__.py`:** Logger import / başlatma sırası düzeltildi.
+- **`core/summarizer.py`:** Özet modeli `settings.groq_model` (tanımsızsa `llama-3.1-8b-instant`).
 
 ### Deprecated
 
@@ -124,7 +140,7 @@ Sonraki sürüme taşınacak değişiklikler. Eklerken mümkünse **`packages/..
 
 - Tek modül (`settings.py`): **Pydantic Settings** ile ortam değişkeni yükleme (proje kökünde `.env`).
 - **PostgreSQL:** `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_HOST`, `POSTGRES_PORT`, `POSTGRES_DB`; bağlantı havuzu: `db_pool_size`, `db_max_overflow`, `db_pool_timeout`, `db_pool_pre_ping`, `db_pool_recycle`.
-- **Slack:** `slack_bot_token`, `slack_user_token`, `slack_app_token`; kanal ve yönetici kimlikleri: `SLACK_WORKSPACE_OWNER_ID`, `SLACK_ADMIN_SLACK_ID`, `SLACK_ADMIN_CHANNEL`, `SLACK_CHALLENGE_CHANNEL`.
+- **Slack:** `slack_bot_token`, `slack_user_token`, `slack_app_token`; kanal ve yönetici kimlikleri: `SLACK_WORKSPACE_OWNER_ID`, `SLACK_ADMINS` (virgülle çoklu; eski `SLACK_ADMIN_SLACK_ID` alias), `SLACK_ADMIN_CHANNEL`, `SLACK_CHALLENGE_CHANNEL`.
 - **Monitör aralıkları (saniye):** `monitor_challenge_interval`, `monitor_deadline_interval`, `monitor_evaluation_interval`.
 - **Challenge / değerlendirme:** `challenge_min_participants`, `challenge_max_participants`, `evaluation_max_wait_hours`, `evaluation_jury_count`.
 - **SMTP (isteğe bağlı):** `smtp_host`, `smtp_port`, `smtp_timeout`, `smtp_email`, `smtp_password`; e-posta/şifre çift doğrulaması ve `smtp_enabled` özelliği.

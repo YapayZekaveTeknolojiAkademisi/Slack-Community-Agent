@@ -38,10 +38,10 @@ def handle_open_submission_modal(ack: Ack, body: dict, client, action):
 
     # Teslimat süresi dolmuş mu?
     if not active_state.is_submission_open(challenge_id):
-        slack_helper.user_client.chat_postEphemeral(
-            channel=body["channel"]["id"],
-            user=user_id,
-            text="⏳ Teslimat süreniz (10 dakika) maalesef doldu!"
+        slack_helper.post_ephemeral_or_dm(
+            channel_id=body["channel"]["id"],
+            user_id=user_id,
+            text="⏳ Teslimat süreniz (10 dakika) maalesef doldu!",
         )
         return
 
@@ -157,10 +157,10 @@ def handle_team_submission_view(ack: Ack, body: dict, client, view):
         try:
             record = service_manager.registry.get_challenge_by_challenge_id(challenge_id)
             if record:
-                slack_helper.user_client.chat_postEphemeral(
-                    channel=record.channel_id,
-                    user=user_id,
-                    text="⚠️ Proje zaten teslim edildi — başka bir ekip üyesi sizi geçti!"
+                slack_helper.post_ephemeral_or_dm(
+                    channel_id=record.channel_id,
+                    user_id=user_id,
+                    text="⚠️ Proje zaten teslim edildi — başka bir ekip üyesi sizi geçti!",
                 )
         except Exception:
             pass
@@ -476,11 +476,13 @@ def handle_surrender_challenge(ack: Ack, body: dict, client, action):
     active_state.clear_submission_deadline(challenge_id)
 
     if not surrendered:
-        slack_helper.user_client.chat_postEphemeral(
-            channel=body.get("channel", {}).get("id", ""),
-            user=user_id,
-            text="❌ Challenge bırakılamadı — aktif bir challenge bulunamadı."
-        )
+        ch = body.get("channel", {}).get("id") or ""
+        if ch:
+            slack_helper.post_ephemeral_or_dm(
+                channel_id=ch,
+                user_id=user_id,
+                text="❌ Challenge bırakılamadı — aktif bir challenge bulunamadı.",
+            )
         return
 
     _logger.info("[EVT] Challenge %s surrendered by %s", challenge_id, user_id)

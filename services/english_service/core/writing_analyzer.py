@@ -1,4 +1,3 @@
-import logging
 from typing import Any
 
 from services.english_service.models import Session
@@ -8,8 +7,7 @@ from services.english_service.core.prompt_builder import (
     build_translation_writing_prompt,
 )
 from services.english_service.llm.client import BaseLLMClient, GroqLLMClient
-
-logger = logging.getLogger(__name__)
+from services.english_service.logger import _logger
 
 
 class WritingAnalyzer:
@@ -149,7 +147,7 @@ class WritingAnalyzer:
                         pass
 
         Metrics.inc("json_parse_failures")
-        logger.warning(
+        _logger.warning(
                 "Writing feedback JSON parsing failed. Raw response: %s",
                 raw_response
         )

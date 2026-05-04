@@ -1,22 +1,59 @@
-import logging
 import re
 
-from packages.slack.client import slack_client
-from services.english_service.manager import EnglishService
+from slack_sdk.errors import SlackApiError
 
-logger = logging.getLogger(__name__)
+from packages.slack.client import slack_client
+from services.english_service.logger import _logger
+from services.english_service.manager import EnglishService
 
 english_service = EnglishService()
 
 
-def handle_service_error(response, client, channel_id):
+def _post_public_channel_announcement(client, channel_id: str, text: str, blocks: list | None = None) -> None:
+    """Genel bildirim veya herkese görünür tespit — yalnızca kanal geneline yönelik mesajlar için kullanın."""
+    kwargs: dict = {"channel": channel_id, "text": text or " "}
+    if blocks:
+        kwargs["blocks"] = blocks
+    client.chat_postMessage(**kwargs)
+
+
+def _post_user_reply(
+    client,
+    channel_id: str,
+    user_id: str,
+    text: str,
+    blocks: list | None = None,
+) -> None:
+    """Öğrenciye özel içerik — ephemeral; kanal arşivliyse veya ephemeral mümkün değilse DM."""
+    kwargs: dict = {"channel": channel_id, "user": user_id, "text": text or " "}
+    if blocks:
+        kwargs["blocks"] = blocks
+    try:
+        client.chat_postEphemeral(**kwargs)
+    except SlackApiError as exc:
+        err = exc.response.get("error") if exc.response else None
+        if err not in ("is_archived", "channel_not_found", "not_in_channel"):
+            raise
+        _logger.warning(
+            "English ephemeral başarısız (%s) — DM ile gönderiliyor user=%s",
+            err,
+            user_id,
+        )
+        try:
+            dm = client.conversations_open(users=user_id)["channel"]["id"]
+            dm_kw: dict = {"channel": dm, "text": text or " "}
+            if blocks:
+                dm_kw["blocks"] = blocks
+            client.chat_postMessage(**dm_kw)
+        except Exception as dm_exc:
+            _logger.error("English DM fallback başarısız user=%s: %s", user_id, dm_exc)
+
+
+def handle_service_error(response, client, channel_id: str, user_id: str):
     if "error" not in response:
         return False
 
-    client.chat_postMessage(
-        channel=channel_id,
-        text=response["error"]
-    )
+    _post_user_reply(client, channel_id, user_id, response["error"])
     return True
 
 
@@ -28,18 +65,21 @@ def setup_english_handlers():
         ack()
 
         user_id = body["user_id"]
+        channel_id = body["channel_id"]
         english_service.start_session(user_id)
 
-        client.chat_postMessage(
-            channel=body["channel_id"],
+        _post_user_reply(
+            client,
+            channel_id,
+            user_id,
             text="Select your level",
             blocks=[
                 {
                     "type": "section",
                     "text": {
                         "type": "mrkdwn",
-                        "text": "*Select your level*"
-                    }
+                        "text": "*Select your level*",
+                    },
                 },
                 {
                     "type": "actions",
@@ -48,27 +88,27 @@ def setup_english_handlers():
                             "type": "button",
                             "text": {"type": "plain_text", "text": "Beginner"},
                             "value": "beginner",
-                            "action_id": "english_select_level_beginner"
+                            "action_id": "english_select_level_beginner",
                         },
                         {
                             "type": "button",
                             "text": {"type": "plain_text", "text": "Intermediate"},
                             "value": "intermediate",
-                            "action_id": "english_select_level_intermediate"
+                            "action_id": "english_select_level_intermediate",
                         },
                         {
                             "type": "button",
                             "text": {"type": "plain_text", "text": "Advanced"},
                             "value": "advanced",
-                            "action_id": "english_select_level_advanced"
-                        }
-                    ]
-                }
-            ]
+                            "action_id": "english_select_level_advanced",
+                        },
+                    ],
+                },
+            ],
         )
 
     @app.message(re.compile(".*"))
-    def handle_writing_submission(message, say):
+    def handle_writing_submission(message, client):
         if message.get("subtype") == "bot_message":
             return
 
@@ -76,9 +116,13 @@ def setup_english_handlers():
             return
 
         user_id = message["user"]
+        channel_id = message.get("channel") or message.get("channel_id")
         text = message.get("text", "").strip()
 
-        if not text:
+        if not text or not channel_id:
+            return
+
+        if text.startswith("/"):
             return
 
         session = english_service.session_manager.get(user_id)
@@ -88,7 +132,7 @@ def setup_english_handlers():
         if session.step != "waiting_writing":
             return
 
-        logger.debug(
+        _logger.debug(
             "English writing submission received. user=%s text_length=%s",
             message.get("user"),
             len(text),
@@ -96,10 +140,10 @@ def setup_english_handlers():
 
         response = english_service.submit_writing(user_id, text)
         if "error" in response:
-            say(response["error"])
+            _post_user_reply(client, channel_id, user_id, response["error"])
             return
 
-        say(response["message"])
+        _post_user_reply(client, channel_id, user_id, response["message"])
 
     @app.action(re.compile("^english_select_level_"))
     def handle_level_selection(ack, body, client):
@@ -110,19 +154,21 @@ def setup_english_handlers():
         selected_level = body["actions"][0]["value"]
 
         response = english_service.select_level(user_id, selected_level)
-        if handle_service_error(response, client, channel_id):
+        if handle_service_error(response, client, channel_id, user_id):
             return
 
-        client.chat_postMessage(
-            channel=channel_id,
+        _post_user_reply(
+            client,
+            channel_id,
+            user_id,
             text=response["message"],
             blocks=[
                 {
                     "type": "section",
                     "text": {
                         "type": "mrkdwn",
-                        "text": f"*Level selected:* `{selected_level}`\nNow choose a mode."
-                    }
+                        "text": f"*Level selected:* `{selected_level}`\nNow choose a mode.",
+                    },
                 },
                 {
                     "type": "actions",
@@ -131,17 +177,17 @@ def setup_english_handlers():
                             "type": "button",
                             "text": {"type": "plain_text", "text": "Writing"},
                             "value": "writing",
-                            "action_id": "english_select_mode_writing"
+                            "action_id": "english_select_mode_writing",
                         },
                         {
                             "type": "button",
                             "text": {"type": "plain_text", "text": "Quiz"},
                             "value": "quiz",
-                            "action_id": "english_select_mode_quiz"
-                        }
-                    ]
-                }
-            ]
+                            "action_id": "english_select_mode_quiz",
+                        },
+                    ],
+                },
+            ],
         )
 
     @app.action(re.compile("^english_select_mode_"))
@@ -153,20 +199,22 @@ def setup_english_handlers():
         selected_mode = body["actions"][0]["value"]
 
         response = english_service.select_mode(user_id, selected_mode)
-        if handle_service_error(response, client, channel_id):
+        if handle_service_error(response, client, channel_id, user_id):
             return
 
         if response["type"] == "writing_type_selection":
-            client.chat_postMessage(
-                channel=channel_id,
+            _post_user_reply(
+                client,
+                channel_id,
+                user_id,
                 text=response["message"],
                 blocks=[
                     {
                         "type": "section",
                         "text": {
                             "type": "mrkdwn",
-                            "text": "*Select writing type*"
-                        }
+                            "text": "*Select writing type*",
+                        },
                     },
                     {
                         "type": "actions",
@@ -175,32 +223,31 @@ def setup_english_handlers():
                                 "type": "button",
                                 "text": {"type": "plain_text", "text": "Topic Writing"},
                                 "value": "topic_writing",
-                                "action_id": "english_select_writing_type_topic"
+                                "action_id": "english_select_writing_type_topic",
                             },
                             {
                                 "type": "button",
                                 "text": {"type": "plain_text", "text": "Translation Writing"},
                                 "value": "translation_writing",
-                                "action_id": "english_select_writing_type_translation"
-                            }
-                        ]
-                    }
-                ]
+                                "action_id": "english_select_writing_type_translation",
+                            },
+                        ],
+                    },
+                ],
             )
             return
 
         if response["type"] == "quiz_question":
-            client.chat_postMessage(
-                channel=channel_id,
+            _post_user_reply(
+                client,
+                channel_id,
+                user_id,
                 text=response["message"],
-                blocks=build_quiz_blocks(response["message"])
+                blocks=build_quiz_blocks(response["message"]),
             )
             return
 
-        client.chat_postMessage(
-            channel=channel_id,
-            text=response["message"]
-        )
+        _post_user_reply(client, channel_id, user_id, response["message"])
 
     @app.action(re.compile("^english_select_writing_type_"))
     def handle_writing_type_selection(ack, body, client):
@@ -211,13 +258,10 @@ def setup_english_handlers():
         writing_type = body["actions"][0]["value"]
 
         response = english_service.select_writing_type(user_id, writing_type)
-        if handle_service_error(response, client, channel_id):
+        if handle_service_error(response, client, channel_id, user_id):
             return
 
-        client.chat_postMessage(
-            channel=channel_id,
-            text=response["message"]
-        )
+        _post_user_reply(client, channel_id, user_id, response["message"])
 
     @app.action(re.compile("^english_quiz_answer_"))
     def handle_quiz_answer(ack, body, client):
@@ -228,27 +272,23 @@ def setup_english_handlers():
         selected_answer = body["actions"][0]["value"]
 
         response = english_service.submit_quiz_answer(user_id, selected_answer)
-        if handle_service_error(response, client, channel_id):
+        if handle_service_error(response, client, channel_id, user_id):
             return
 
-        client.chat_postMessage(
-            channel=channel_id,
-            text=response["message"]
-        )
+        _post_user_reply(client, channel_id, user_id, response["message"])
 
         next_payload = response.get("next")
         if next_payload:
             if next_payload["type"] == "quiz_question":
-                client.chat_postMessage(
-                    channel=channel_id,
+                _post_user_reply(
+                    client,
+                    channel_id,
+                    user_id,
                     text=next_payload["message"],
-                    blocks=build_quiz_blocks(next_payload["message"])
+                    blocks=build_quiz_blocks(next_payload["message"]),
                 )
             else:
-                client.chat_postMessage(
-                    channel=channel_id,
-                    text=next_payload["message"]
-                )
+                _post_user_reply(client, channel_id, user_id, next_payload["message"])
 
 
 def build_quiz_blocks(message: str):
@@ -257,8 +297,8 @@ def build_quiz_blocks(message: str):
             "type": "section",
             "text": {
                 "type": "mrkdwn",
-                "text": message
-            }
+                "text": message,
+            },
         },
         {
             "type": "actions",
@@ -267,20 +307,20 @@ def build_quiz_blocks(message: str):
                     "type": "button",
                     "text": {"type": "plain_text", "text": "1"},
                     "value": "1",
-                    "action_id": "english_quiz_answer_1"
+                    "action_id": "english_quiz_answer_1",
                 },
                 {
                     "type": "button",
                     "text": {"type": "plain_text", "text": "2"},
                     "value": "2",
-                    "action_id": "english_quiz_answer_2"
+                    "action_id": "english_quiz_answer_2",
                 },
                 {
                     "type": "button",
                     "text": {"type": "plain_text", "text": "3"},
                     "value": "3",
-                    "action_id": "english_quiz_answer_3"
-                }
-            ]
-        }
+                    "action_id": "english_quiz_answer_3",
+                },
+            ],
+        },
     ]

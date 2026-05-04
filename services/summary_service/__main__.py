@@ -12,9 +12,9 @@ from __future__ import annotations
 import signal
 import sys
 
+from services.summary_service.logger import _logger  # noqa: F401 — start_logging (once)
 from packages.slack.client import slack_client
 from services.summary_service import handlers as _handlers  # noqa: F401
-from services.summary_service.logger import _logger
 
 
 def _handle_signal(sig: int, _frame) -> None:

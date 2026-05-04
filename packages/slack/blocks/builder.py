@@ -8,7 +8,7 @@ class BlockBuilder:
 
     @staticmethod
     def header(text: str) -> Dict[str, Any]:
-        """Başlık bloğu oluşturur (max 3000 karakter)."""
+        """Başlık bloğu oluşturur (plain_text üst sınırı 150 karakter)."""
         return {
             "type": "header",
             "text": {"type": "plain_text", "text": text, "emoji": True}
@@ -177,11 +177,31 @@ class MessageBuilder:
         self._blocks: List[Dict] = []
 
     def add_header(self, text: str) -> "MessageBuilder":
-        self._blocks.append(BlockBuilder.header(text))
+        # Slack header plain_text üst sınırı 150 karakter
+        t = (text or "")[:150]
+        self._blocks.append(BlockBuilder.header(t))
         return self
 
     def add_text(self, text: str, fields: Optional[List[str]] = None) -> "MessageBuilder":
         self._blocks.append(BlockBuilder.section(text=text, fields=fields))
+        return self
+
+    def add_plain_text(self, text: str) -> "MessageBuilder":
+        """plain_text section(lar); LLM çıktısı için (mrkdwn limiti / özel karakter riskinden kaçınır)."""
+        t = text or ""
+        if not t.strip():
+            return self
+        max_c = 2999
+        i = 0
+        while i < len(t):
+            chunk = t[i : i + max_c]
+            self._blocks.append(
+                {
+                    "type": "section",
+                    "text": {"type": "plain_text", "text": chunk, "emoji": True},
+                }
+            )
+            i += max_c
         return self
 
     def add_divider(self) -> "MessageBuilder":

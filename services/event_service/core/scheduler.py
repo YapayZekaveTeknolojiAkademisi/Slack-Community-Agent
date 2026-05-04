@@ -20,7 +20,11 @@ from packages.slack.client import slack_client
 from packages.slack.blocks.builder import MessageBuilder
 from ..logger import _logger
 from ..utils.notifications import (
-    get_announcement_channels, send_dm, _location_display, _calendar_url,
+    get_announcement_channels,
+    send_dm,
+    _location_display,
+    _calendar_url,
+    update_admin_request_message,
 )
 from ..utils.email import send_reminder_email_async, send_user_status_email_async
 
@@ -82,16 +86,23 @@ class EventScheduler:
             for evt in expired:
                 evt.status = EventStatus.REJECTED
                 _logger.info("[SCHED] Timeout: %s", evt.id)
-                send_dm(
-                    evt.creator_slack_id,
-                    f"Etkinlik Talebiniz Zaman Aşımına Uğradı\n\n"
-                    f"*{evt.name}*\n"
-                    f"{evt.date.strftime('%d %B %Y')} · {evt.time.strftime('%H:%M')}\n\n"
-                    f"Talebiniz {s.event_approval_timeout_hours // 24} gün içinde yanıt alamadığı için "
-                    f"otomatik olarak reddedildi.\n\n"
-                    f"Yeni bir etkinlik talebi için `/event create` komutunu kullanabilirsiniz.\n_{evt.id}_"
-                )
-                await send_user_status_email_async(evt.creator_slack_id, evt, "timeout")
+                try:
+                    send_dm(
+                        evt.creator_slack_id,
+                        f"Etkinlik Talebiniz Zaman Aşımına Uğradı\n\n"
+                        f"*{evt.name}*\n"
+                        f"{evt.date.strftime('%d %B %Y')} · {evt.time.strftime('%H:%M')}\n\n"
+                        f"Talebiniz {s.event_approval_timeout_hours // 24} gün içinde yanıt alamadığı için "
+                        f"otomatik olarak reddedildi.\n\n"
+                        f"Yeni bir etkinlik talebi için `/event create` komutunu kullanabilirsiniz.\n_{evt.id}_",
+                    )
+                except Exception as e:
+                    _logger.warning("[SCHED] Timeout Slack DM failed event=%s: %s", evt.id, e)
+                try:
+                    await send_user_status_email_async(evt.creator_slack_id, evt, "timeout")
+                except Exception as e:
+                    _logger.warning("[SCHED] Timeout e-posta failed event=%s: %s", evt.id, e)
+                update_admin_request_message(evt, outcome="timeout", admin_id=None, note=None)
 
     # ---- 2. COMPLETED gecisi ----
 
@@ -182,7 +193,10 @@ class EventScheduler:
 
         # E-posta gonder (read session kapandiktan sonra)
         for slack_id, evt in interested_users:
-            await send_reminder_email_async(slack_id, evt, "day")
+            try:
+                await send_reminder_email_async(slack_id, evt, "day")
+            except Exception as e:
+                _logger.warning("[SCHED] Morning reminder email skipped slack_id=%s: %s", slack_id, e)
 
         self._morning_reminder_last_date = local_today
         _logger.info("[SCHED] Morning reminder sent for %d events", len(events))
@@ -259,7 +273,10 @@ class EventScheduler:
 
             # E-posta gonder
             for slack_id in interested_ids:
-                await send_reminder_email_async(slack_id, evt, "10min")
+                try:
+                    await send_reminder_email_async(slack_id, evt, "10min")
+                except Exception as e:
+                    _logger.warning("[SCHED] 10min reminder email skipped slack_id=%s: %s", slack_id, e)
 
             _logger.info("[SCHED] 10min reminder sent: %s", evt.id)
 

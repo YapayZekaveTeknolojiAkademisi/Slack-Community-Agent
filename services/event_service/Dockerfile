@@ -25,12 +25,14 @@ COPY packages ./packages
 COPY services ./services
 COPY migrations ./migrations
 COPY alembic.ini ./alembic.ini
+COPY docker/entrypoint-appuser-hfcache.sh /usr/local/bin/entrypoint.sh
 
 RUN useradd --create-home --uid 1000 appuser && \
     mkdir -p /app/logs && \
-    chown -R appuser:appuser /app
-USER appuser
+    chown -R appuser:appuser /app && \
+    chmod +x /usr/local/bin/entrypoint.sh
+
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
+CMD ["python", "-m", "services.event_service", "--socket"]
 
 LABEL org.opencontainers.image.title="slack-community-agent-event"
-
-CMD ["python", "-m", "services.event_service", "--socket"]

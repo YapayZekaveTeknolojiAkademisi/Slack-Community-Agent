@@ -5,8 +5,25 @@ from services.english_service.models import Session
 
 class FlowEngine:
 
+    _TRANSIENT_KEYS = (
+        "quiz_questions",
+        "current_index",
+        "writing_type",
+        "topic",
+        "source_text",
+        "min_words",
+        "last_writing_feedback",
+    )
+
     def start(self, session: Session) -> Dict:
+        """Yeni /english oturumu: seçim adımına dön; eski level/mode ve ara görev durumunu temizle."""
         session.step = "select_level"
+        session.level = None
+        session.mode = None
+        session.context = []
+        if hasattr(session, "data") and session.data is not None:
+            for key in self._TRANSIENT_KEYS:
+                session.data.pop(key, None)
         return {
             "type": "level_selection",
             "message": "Select your level"
