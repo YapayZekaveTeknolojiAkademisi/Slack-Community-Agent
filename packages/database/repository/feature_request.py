@@ -42,7 +42,7 @@ class FeatureRequestRepository(BaseRepository[FeatureRequest]):
             .where(FeatureRequest.created_at >= week_ago)
             .where(
                 FeatureRequest.status.in_(
-                    ["embedded", "clustered", "reported", "embedding_failed"]
+                    ["embedded", "clustered", "reported"]
                 )
             )
         )
