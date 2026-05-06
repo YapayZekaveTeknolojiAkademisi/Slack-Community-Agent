@@ -892,6 +892,12 @@ class FeatureRequestService:
                     error=str(exc),
                 )
                 self.logger.error(f"HDBSCAN hatası: {exc}", exc_info=True)
+                if not is_preview:
+                    for req_id in valid_ids:
+                        record = await fr_repo.get(req_id)
+                        if record:
+                            record.status = "clustering_failed"
+                    await session.flush()
                 return {
                     "clustered": 0,
                     "noise": len(valid_ids),
