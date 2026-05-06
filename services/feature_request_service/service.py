@@ -762,7 +762,7 @@ class FeatureRequestService:
                 preview_records_agg: list = []
                 preview_labels_agg: dict = {}
 
-                for cid in set(int(lb) for lb in agg_labels if lb != -1):
+                for cid in set(int(lb) for lb in agg_labels):
                     c_indices = [i for i, lb in enumerate(agg_labels) if lb == cid]
                     s_ids = [valid_ids[i] for i in c_indices[:5]]
                     s_texts = [record_by_id_agg[sid].request_raw for sid in s_ids]
@@ -777,7 +777,7 @@ class FeatureRequestService:
                 return {
                     "pipeline_type": "agglomerative_preview",
                     "clustered": len(preview_records_agg),
-                    "noise": n - len(preview_records_agg),
+                    "noise": 0,
                     "new_labels": len(preview_labels_agg),
                     "preview_records": preview_records_agg,
                     "preview_labels": preview_labels_agg,
