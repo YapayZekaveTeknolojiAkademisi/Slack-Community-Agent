@@ -667,18 +667,26 @@ class FeatureRequestService:
             # --- Vektör matrisini oluştur ---
             vectors = []
             valid_ids = []
+            invalid_records = []
             for record in embedded:
                 if record.request_embedded is None:
+                    invalid_records.append(record)
                     continue
                 try:
                     vec = np.array(record.request_embedded, dtype=np.float32)
                     vectors.append(vec)
                     valid_ids.append(record.id)
                 except Exception as exc:
+                    invalid_records.append(record)
                     self.logger.warning(
                         f"BLOB okuma hatası, atlanıyor: {exc}",
                         extra={"record_id": record.id},
                     )
+
+            if invalid_records and not is_preview:
+                for record in invalid_records:
+                    record.status = "embedding_failed"
+                await session.flush()
 
             skipped_embed = len(embedded) - len(vectors)
             _clustering_trace(
