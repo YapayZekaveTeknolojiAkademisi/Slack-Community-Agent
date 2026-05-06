@@ -4,16 +4,20 @@ Feature Request Repository
 METODLAR
 --------
   FeatureRequestRepository:
-    list_by_user_this_week(user_id)  → Kullanıcının son 7 gündeki kayıtlarını getirir.
-    list_by_status(status)           → Belirtilen durumdaki tüm talepleri getirir.
-    list_by_cluster_id(cluster_id)   → Belirli bir cluster_id'ye sahip tüm kayıtları getirir.
-    list_embedded_vectors(user_id)   → Kullanıcının son 7 gündeki gömülü (embedded) vektörleri olan taleplerini getirir.
+    list_by_user_this_week(user_id)       → Kullanıcının son 7 gündeki kayıtlarını getirir.
+    list_by_status(status)                → Belirtilen durumdaki tüm talepleri getirir.
+    list_by_cluster_id(cluster_id)        → Belirli bir cluster_id'ye sahip tüm kayıtları getirir.
+    list_embedded_vectors(user_id)        → Kullanıcının son 7 gündeki gömülü (embedded) vektörleri olan taleplerini getirir.
     update_cluster(request_id, cluster_id) → Talebe cluster atar ve status'u clustered yapar.
-    mark_reported(request_ids)       → Verilen taleplerin status'unu reported yapar.
+    mark_reported(request_ids)            → Verilen taleplerin status'unu reported yapar.
+    increment_retry_count(request_id)     → Noise kayıdın retry_count'unu 1 artırır.
+    reset_retry_count(request_id)         → Başarılı kümeleme sonrası retry_count'u sıfırlar.
+    delete_reported()                     → Reported statüsündeki tüm kayıtları kalıcı siler (hafta başı temizlik).
 
   FeatureClusterLabelRepository:
-    get_by_cluster_id(cluster_id)    → Küme ID ile etiket nesnesini getirir.
-    increment_report_count(cluster_id) → Etiketin raporlanma sayısını bir artırır.
+    get_by_cluster_id(cluster_id)         → Küme ID ile etiket nesnesini getirir.
+    increment_report_count(cluster_id)    → Etiketin raporlanma sayısını bir artırır.
+    delete_labels()                       → Tüm cluster etiketlerini kalıcı olarak siler.
 """
 
 from datetime import datetime, timedelta, timezone
@@ -115,6 +119,44 @@ class FeatureRequestRepository(BaseRepository[FeatureRequest]):
         )
         await self.session.flush()
 
+    async def increment_retry_count(self, request_id: str) -> int:
+        """
+        HDBSCAN noise (-1) olarak işaretlenen kaydın retry_count'unu 1 artırır.
+        Güncellenen retry_count değerini döndürür.
+        """
+        request = await self.get(request_id)
+        if request:
+            request.retry_count = (request.retry_count or 0) + 1
+            await self.session.flush()
+            return request.retry_count
+        return 0
+
+    async def reset_retry_count(self, request_id: str) -> None:
+        """
+        Başarılı HDBSCAN kümelemesi sonrasında kaydın retry_count'unu sıfırlar.
+        """
+        request = await self.get(request_id)
+        if request:
+            request.retry_count = 0
+            await self.session.flush()
+
+    async def delete_reported(self) -> int:
+        """
+        Reported statüsündeki tüm kayıtları kalıcı olarak siler.
+        Hafta başı send_weekly_report() içinde çağrılır; önceki haftanın
+        raporlanmış kayıtlarını temizler.
+
+        Returns:
+            Silinen kayıt sayısı.
+        """
+        from sqlalchemy import delete as sql_delete
+
+        result = await self.session.execute(
+            sql_delete(FeatureRequest).where(FeatureRequest.status == "reported")
+        )
+        await self.session.flush()
+        return result.rowcount
+
     async def delete_pending_bypass(self, user_id: str) -> None:
         """Kullanıcının askıda kalan pending_bypass kayıtlarını siler."""
         from sqlalchemy import delete as sql_delete
@@ -164,3 +206,14 @@ class FeatureClusterLabelRepository(BaseRepository[FeatureClusterLabel]):
             label_record.report_count += 1
             return await self.update(label_record)
         return None
+
+    async def delete_labels(self) -> int:
+        """
+        Tüm cluster etiketlerini kalıcı olarak siler.
+        Haftalık temizlik (send_weekly_report) esnasında çağrılır.
+        """
+        from sqlalchemy import delete as sql_delete
+
+        result = await self.session.execute(sql_delete(FeatureClusterLabel))
+        await self.session.flush()
+        return result.rowcount

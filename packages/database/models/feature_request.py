@@ -33,13 +33,14 @@ class FeatureRequest(Base, IDMixin, TimestampMixin):
         Vector(768), nullable=True
     )
 
-    # embedded | clustered | reported | embedding_failed | clustering_failed
+    # embedded | clustered | reported | embedding_failed | clustering_failed | pending_bypass
     status: Mapped[str] = mapped_column(
         String, default="embedded", nullable=False, index=True
     )
 
     cluster_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     fraud_score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    retry_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
 
     user: Mapped["SlackUser"] = relationship("SlackUser", backref="feature_requests")
 

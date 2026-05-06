@@ -30,6 +30,7 @@ class FeatureRequestMonitor:
 
         s = get_settings()
         self._tasks = [
+            # Günlük: embedding_failed kayıtları yeniden dene
             asyncio.create_task(
                 self._daily(
                     time(s.feature_request_embed_retry_hour, s.feature_request_embed_retry_minute),
@@ -37,25 +38,7 @@ class FeatureRequestMonitor:
                     "embed_retry",
                 )
             ),
-            asyncio.create_task(
-                self._weekly(
-                    s.feature_request_clustering_weekday,
-                    time(
-                        s.feature_request_cluster_fail_before_pipeline_hour,
-                        s.feature_request_cluster_fail_before_pipeline_minute,
-                    ),
-                    self._svc.check_clustering_failed,
-                    "clust_fail_wed",
-                )
-            ),
-            asyncio.create_task(
-                self._weekly(
-                    s.feature_request_clustering_weekday,
-                    time(s.feature_request_clustering_hour, s.feature_request_clustering_minute),
-                    self._svc.run_clustering_pipeline,
-                    "clust_wed",
-                )
-            ),
+            # Cumartesi öncesi kontrol: clustering_failed var mı?
             asyncio.create_task(
                 self._weekly(
                     s.feature_request_report_weekday,
@@ -67,6 +50,7 @@ class FeatureRequestMonitor:
                     "clust_fail_sat",
                 )
             ),
+            # Cumartesi: pipeline + rapor + temizlik (send_weekly_report içinde)
             asyncio.create_task(
                 self._weekly(
                     s.feature_request_report_weekday,
@@ -75,6 +59,7 @@ class FeatureRequestMonitor:
                     "report_sat",
                 )
             ),
+            # Periyodik: vektör modelini boşta ise bellekten boşalt
             asyncio.create_task(
                 self._periodic(
                     s.feature_request_vector_idle_interval_seconds,
