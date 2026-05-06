@@ -102,6 +102,7 @@ def handle_cemil_report(ack, body, client):
         r_data = run_async(_svc().run_clustering_pipeline(is_preview=True))
         rt = run_async(
             _svc().generate_admin_report(
+                pipeline_result=r_data,
                 pipeline_stats=r_data.get("clustering_log"),
                 is_preview=True,
                 preview_data=r_data,
