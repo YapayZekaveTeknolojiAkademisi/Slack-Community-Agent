@@ -24,12 +24,12 @@ DÖNÜŞ TİPLERİ (submit_request)
   {"status": "quota_exceeded",  "used": 2, "max": 2}
 """
 
-from collections import defaultdict
-from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
 import logging
 import os
 import tempfile
+from collections import defaultdict
+from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 # Numba önce NUMBA_CACHE_DIR ile yazılabilir bir kök arar; yoksa site-packages/__pycache__
@@ -101,7 +101,9 @@ cosine distance 0.7 → cosine similarity ≈ 0.755.
 Linkage: average + metric: cosine (L2 normalizasyon gerekmez)."""
 
 
-def _umap_params_for_sample_count(n_samples: int, params: ClusteringParams) -> tuple[int, int, dict]:
+def _umap_params_for_sample_count(
+    n_samples: int, params: ClusteringParams
+) -> tuple[int, int, dict]:
     """
     UMAP spektral başlatma scipy eigsh ile k < N ister; n_components ve n_neighbors üst sınırı taşarsa TypeError oluşur (az kayıt).
     """
@@ -203,7 +205,9 @@ class FeatureRequestService:
                     self.logger,
                     "submit_embed_ok",
                     user_id=user_id,
-                    embedding_dims=list(vector.shape) if hasattr(vector, "shape") else None,
+                    embedding_dims=list(vector.shape)
+                    if hasattr(vector, "shape")
+                    else None,
                     text_chars=len(raw_text or ""),
                 )
             except Exception as exc:
@@ -800,8 +804,8 @@ class FeatureRequestService:
 
             # --- UMAP boyut indirgeme ---
             n_samples = len(vectors)
-            n_neighbors_umap, n_components_umap, umap_extra = _umap_params_for_sample_count(
-                n_samples, params
+            n_neighbors_umap, n_components_umap, umap_extra = (
+                _umap_params_for_sample_count(n_samples, params)
             )
             _clustering_trace(
                 self.logger,
@@ -875,8 +879,7 @@ class FeatureRequestService:
                 labels = clusterer.fit_predict(reduced)  # -1 = noise
                 uniq, counts = np.unique(labels, return_counts=True)
                 label_dist = {
-                    int(k): int(v)
-                    for k, v in zip(uniq.tolist(), counts.tolist())
+                    int(k): int(v) for k, v in zip(uniq.tolist(), counts.tolist())
                 }
                 _clustering_trace(
                     self.logger,
@@ -941,9 +944,7 @@ class FeatureRequestService:
                 await fr_repo.mark_reported([r.id for r in unmatched_records])
 
             noise_ids_sample = [
-                valid_ids[i]
-                for i, lb in enumerate(labels)
-                if lb == -1
+                valid_ids[i] for i, lb in enumerate(labels) if lb == -1
             ][:25]
             member_map: defaultdict[int, list[str]] = defaultdict(list)
             for rid, lb in zip(valid_ids, labels):
@@ -1186,14 +1187,18 @@ class FeatureRequestService:
         if pipeline_type == "agglomerative_preview":
             pr_records = (pipeline_result or {}).get("preview_records", [])
             pr_labels = (pipeline_result or {}).get("preview_labels", {})
-            total_n = (pipeline_result or {}).get("clustered", 0) + (pipeline_result or {}).get("noise", 0)
+            total_n = (pipeline_result or {}).get("clustered", 0) + (
+                pipeline_result or {}
+            ).get("noise", 0)
 
             clusters_agg: dict[int, list] = {}
             for rec in pr_records:
                 if rec.cluster_id is not None:
                     clusters_agg.setdefault(rec.cluster_id, []).append(rec)
 
-            sorted_agg = sorted(clusters_agg.items(), key=lambda x: len(x[1]), reverse=True)
+            sorted_agg = sorted(
+                clusters_agg.items(), key=lambda x: len(x[1]), reverse=True
+            )
             medals = ["🥇", "🥈", "🥉"]
             agg_lines: list[str] = []
             for i, (cid, recs) in enumerate(sorted_agg[:3]):
@@ -1276,9 +1281,7 @@ class FeatureRequestService:
                 desc = await self._describe_cluster(cid, label, sample_texts)
 
                 fraud_flagged = [
-                    r
-                    for r in records
-                    if r.fraud_score and r.fraud_score > fraud_thresh
+                    r for r in records if r.fraud_score and r.fraud_score > fraud_thresh
                 ]
                 fraud_note = (
                     f"\n   ⚠️ {len(fraud_flagged)} fraud şüpheli kayıt."
@@ -1406,10 +1409,10 @@ class FeatureRequestService:
             async with self.db.session() as session:
                 fr_repo = FeatureRequestRepository(session)
                 fcl_repo = FeatureClusterLabelRepository(session)
-                
+
                 deleted_reqs = await fr_repo.delete_reported()
                 deleted_labels = await fcl_repo.delete_labels()
-                
+
                 if deleted_reqs or deleted_labels:
                     self.logger.info(
                         f"Haftalık temizlik: {deleted_reqs} reported kayıt ve {deleted_labels} cluster etiketi silindi."
