@@ -207,6 +207,17 @@ class FeatureClusterLabelRepository(BaseRepository[FeatureClusterLabel]):
             return await self.update(label_record)
         return None
 
+    async def list_all_cluster_ids(self) -> set[int]:
+        """Tablodaki tüm cluster_id değerlerini döndürür.
+
+        Session 1'in sonunda çağrılır; pipeline Groq çağrılarını yapmadan önce
+        hangi cluster'ların zaten etiketlenmiş olduğunu öğrenmek için kullanılır.
+        """
+        result = await self.session.execute(
+            select(FeatureClusterLabel.cluster_id)
+        )
+        return set(result.scalars().all())
+
     async def delete_labels(self) -> int:
         """
         Tüm cluster etiketlerini kalıcı olarak siler.
