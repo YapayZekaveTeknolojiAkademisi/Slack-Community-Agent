@@ -209,6 +209,25 @@ class SystemSettings(BaseSettings):
             "feature_request_embed_retry_minute",
         ),
     )
+    feature_request_cluster_retry_hour: int = Field(
+        4,
+        ge=0,
+        le=23,
+        validation_alias=AliasChoices(
+            "FEATURE_REQUEST_CLUSTER_RETRY_HOUR",
+            "feature_request_cluster_retry_hour",
+        ),
+        description="clustering_failed kayıtlarını yeniden kümelemeye sokmak için günlük saat",
+    )
+    feature_request_cluster_retry_minute: int = Field(
+        0,
+        ge=0,
+        le=59,
+        validation_alias=AliasChoices(
+            "FEATURE_REQUEST_CLUSTER_RETRY_MINUTE",
+            "feature_request_cluster_retry_minute",
+        ),
+    )
 
     feature_request_report_weekday: int = Field(
         5,

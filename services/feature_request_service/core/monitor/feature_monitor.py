@@ -38,6 +38,14 @@ class FeatureRequestMonitor:
                     "embed_retry",
                 )
             ),
+            # Günlük: clustering_failed kayıtları embedded'a geri al (yeniden deneme)
+            asyncio.create_task(
+                self._daily(
+                    time(s.feature_request_cluster_retry_hour, s.feature_request_cluster_retry_minute),
+                    self._svc.retry_clustering_failed,
+                    "cluster_retry",
+                )
+            ),
             # Cumartesi öncesi kontrol: clustering_failed var mı?
             asyncio.create_task(
                 self._weekly(

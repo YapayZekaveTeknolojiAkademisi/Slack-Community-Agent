@@ -8,7 +8,8 @@ Feature Request Servisi
   check_weekly_quota()      → Bu hafta kaç submit hakkı kaldı?
   find_similar_this_week()  → Bu haftaki kayıtlarla cosine similarity karşılaştırması
   detect_fraud()            → Farklı kullanıcılardan gelen benzer vektörleri tespit et
-  run_clustering_pipeline() → status=embedded → L2 norm → UMAP → HDBSCAN → label → DB yaz
+  run_clustering_pipeline()    → status=embedded → L2 norm → UMAP → HDBSCAN → label → DB yaz
+  retry_clustering_failed()    → status=clustering_failed → status=embedded (pipeline'a tekrar girer)
   generate_admin_report()   → Kümelenmiş verilerden Groq ile Türkçe rapor üret
 
 BAĞIMLILIKLAR
@@ -1462,6 +1463,30 @@ class FeatureRequestService:
                 self.logger.debug(
                     "Garbage collection: Silinecek bekleyen taslak bulunamadı."
                 )
+
+    async def retry_clustering_failed(self) -> None:
+        """
+        status='clustering_failed' olan kayıtları bulup status'larını 'embedded' olarak sıfırlar;
+        böylece bir sonraki haftalık pipeline çalıştırmasında yeniden kümeleme denenir.
+
+        Kayıt sayısı loglanır; başarı durumunda herhangi bir bildirim gönderilmez.
+        Eğer kayıt yok ise sessizce çıkar.
+        """
+        async with self.db.session() as session:
+            repo = FeatureRequestRepository(session)
+            failed_records = await repo.list_by_status("clustering_failed")
+            if not failed_records:
+                self.logger.debug("retry_clustering_failed: Yeniden denenecek kayıt yok.")
+                return
+
+            for record in failed_records:
+                record.status = "embedded"
+                record.retry_count = (record.retry_count or 0) + 1
+
+            await session.flush()
+            self.logger.info(
+                f"Clustering retry: {len(failed_records)} kayıt 'embedded' statüsüne alındı."
+            )
 
     async def check_clustering_failed(self) -> None:
         """status='clustering_failed' olan kayıtları kontrol eder ve hâlâ varsa uyarı gönderir."""
