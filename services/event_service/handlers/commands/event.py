@@ -11,14 +11,27 @@ from packages.database.manager import db
 from packages.database.models.event import Event, EventInterest, EventStatus
 from packages.database.repository.event import EventRepository, EventInterestRepository
 from packages.settings import get_settings
-from packages.slack.blocks.builder import MessageBuilder, BlockBuilder
+from packages.slack.blocks.builder import MessageBuilder
 from packages.slack.client import slack_client
+from packages.slack.community_help import english_help_mrkdwn, event_help_mrkdwn
 from ...logger import _logger
 from ...utils.calendar import build_google_calendar_url
 from ...utils.notifications import _location_display
+from ...utils.slack_io import run_slack_io
+from ...utils.slack_profiles import slack_display_names_for_users
 
 app: App = slack_client.app
 settings = get_settings()
+
+
+def _creator_display_names(events: list) -> dict[str, str]:
+    """Çoklu `users.info` Slack çağrısını arka plan thread'de yapar."""
+    ids = frozenset(getattr(e, "creator_slack_id", "") for e in events)
+    if "" in ids:
+        ids -= frozenset({""})
+    if not ids:
+        return {}
+    return run_slack_io(lambda: slack_display_names_for_users(ids))
 
 
 def _allowed_event_slash_channels() -> frozenset[str]:
@@ -67,7 +80,7 @@ def handle_event_command(ack: Ack, body: dict, client, command):
         return
 
     if cmd == "create":
-        _open_create_modal(client, body.get("trigger_id"), user_id)
+        _open_create_modal(client, body.get("trigger_id"), user_id, channel_id)
     elif cmd == "list":
         _handle_list(client, user_id, channel_id)
     elif cmd == "my_list":
@@ -85,7 +98,7 @@ def handle_event_command(ack: Ack, body: dict, client, command):
     else:
         client.chat_postEphemeral(
             channel=channel_id, user=user_id,
-            text="Bilinmeyen komut. `/event help` ile kullanılabilir komutları görün."
+            text="Bilinmeyen komut. `/event help` veya `/help` ile özeti görün.",
         )
 
 
@@ -100,6 +113,16 @@ DURATION_OPTIONS = [
     {"label": "2 saat", "value": "120"},
     {"label": "3 saat", "value": "180"},
 ]
+
+def pending_quota_denial_message(limit: int, pending: int) -> str:
+    """Bekleyen talep ust limiti dolu kullaniciya Slack mesaji."""
+    return (
+        f"Aynı anda en fazla *{limit}* bekleyen (onay bekleyen) etkinlik talebiniz olabilir. "
+        f"Şu an *{pending}* bekleyen talebiniz var. "
+        "Yer açılır: bir talep yöneticiler tarafından onaylandığında veya reddedildiğinde ya da "
+        "onay süresi dolduğunda talep otomatik kapandığında (`EVENT_APPROVAL_TIMEOUT_HOURS`)."
+    )
+
 
 LOCATION_OPTIONS = [
     {"label": "Slack Kanalı", "value": "slack_channel"},
@@ -208,7 +231,27 @@ def _build_event_form_blocks(initial: dict | None = None) -> list[dict]:
     return blocks
 
 
-def _open_create_modal(client, trigger_id: str, user_id: str) -> None:
+def _open_create_modal(client, trigger_id: str, user_id: str, channel_id: str) -> None:
+    lim = settings.event_max_pending_per_user
+    if lim > 0:
+
+        async def _pending_count():
+            async with db.session(read_only=True) as session:
+                repo = EventRepository(session)
+                return await repo.count_pending_by_creator(user_id)
+
+        pending = _run_async(_pending_count())
+        if pending >= lim:
+            txt = pending_quota_denial_message(lim, pending)
+            try:
+                client.chat_postEphemeral(channel=channel_id, user=user_id, text=txt)
+            except Exception:
+                try:
+                    client.chat_postMessage(channel=user_id, text=txt)
+                except Exception:
+                    _logger.warning("[EVT] quota deny: failed to DM user=%s", user_id)
+            return
+
     blocks = _build_event_form_blocks()
     client.views_open(
         trigger_id=trigger_id,
@@ -259,8 +302,10 @@ def _handle_list(client, user_id: str, channel_id: str) -> None:
         builder.add_text("_Bu ay henüz onaylanmış etkinlik yok._")
     else:
         from ...utils.notifications import _calendar_url
+
         builder.add_divider()
-        for evt, count in items:
+        cal_urls = run_slack_io(lambda: [_calendar_url(e) for e, _ in items])
+        for (evt, count), cal_url in zip(items, cal_urls):
             loc = _location_with_link_inline(evt)
             interested_marker = " · ✓ ilgi gösterdin" if evt.id in user_interest_ids else ""
             line = (
@@ -270,7 +315,6 @@ def _handle_list(client, user_id: str, channel_id: str) -> None:
                 f"  <@{evt.creator_slack_id}>  · {count} ilgili{interested_marker}"
             )
             builder.add_text(line)
-            cal_url = _calendar_url(evt)
             builder.add_button("Katılacağım", "event_interest_btn", value=evt.id, style="primary")
             builder.add_button("Google Takvime Ekle", "event_calendar_btn", value=evt.id, url=cal_url)
             builder.add_divider()
@@ -431,27 +475,12 @@ def _handle_add_me(client, body: dict, user_id: str, channel_id: str) -> None:
         )
         return
 
-    # Kullanici adlarini Slack API'den cek (cache)
-    _name_cache: dict[str, str] = {}
-    def _resolve_name(slack_id: str) -> str:
-        if slack_id in _name_cache:
-            return _name_cache[slack_id]
-        try:
-            resp = slack_client.bot_client.users_info(user=slack_id)
-            if resp.get("ok"):
-                profile = resp["user"].get("profile", {})
-                name = profile.get("display_name") or profile.get("real_name") or resp["user"].get("real_name", slack_id)
-                _name_cache[slack_id] = name
-                return name
-        except Exception:
-            pass
-        _name_cache[slack_id] = slack_id
-        return slack_id
+    name_map = _creator_display_names(events)
 
     # Dropdown secenekleri olustur — tarihe gore sirali
     options = []
     for evt in sorted(events, key=lambda e: (e.date, e.time)):
-        creator_name = _resolve_name(evt.creator_slack_id)
+        creator_name = name_map.get(evt.creator_slack_id, evt.creator_slack_id)
         label = f"{evt.date.strftime('%d %b')} — {evt.name} ({creator_name})"
         if len(label) > 75:
             label = label[:72] + "..."
@@ -524,27 +553,12 @@ def _handle_cancel(client, body: dict, user_id: str, channel_id: str) -> None:
                                    text="İptal edilebilecek aktif etkinliğiniz yok.")
         return
 
-    # Kullanici adlarini Slack API'den cek (cache)
-    _name_cache: dict[str, str] = {}
-    def _resolve_name(slack_id: str) -> str:
-        if slack_id in _name_cache:
-            return _name_cache[slack_id]
-        try:
-            resp = slack_client.bot_client.users_info(user=slack_id)
-            if resp.get("ok"):
-                profile = resp["user"].get("profile", {})
-                name = profile.get("display_name") or profile.get("real_name") or resp["user"].get("real_name", slack_id)
-                _name_cache[slack_id] = name
-                return name
-        except Exception:
-            pass
-        _name_cache[slack_id] = slack_id
-        return slack_id
+    name_map = _creator_display_names(events)
 
     # Dropdown secenekleri olustur — tarihe gore sirali
     options = []
     for evt in sorted(events, key=lambda e: (e.date, e.time)):
-        creator_name = _resolve_name(evt.creator_slack_id)
+        creator_name = name_map.get(evt.creator_slack_id, evt.creator_slack_id)
         label = f"{evt.date.strftime('%d %b')} — {evt.name} ({creator_name})"
         # Slack option text max 75 karakter
         if len(label) > 75:
@@ -607,27 +621,12 @@ def _handle_update(client, body: dict, user_id: str, channel_id: str) -> None:
                                    text="Güncellenebilecek aktif etkinliğiniz yok.")
         return
 
-    # Kullanici adlarini Slack API'den cek (cache)
-    _name_cache: dict[str, str] = {}
-    def _resolve_name(slack_id: str) -> str:
-        if slack_id in _name_cache:
-            return _name_cache[slack_id]
-        try:
-            resp = slack_client.bot_client.users_info(user=slack_id)
-            if resp.get("ok"):
-                profile = resp["user"].get("profile", {})
-                name = profile.get("display_name") or profile.get("real_name") or resp["user"].get("real_name", slack_id)
-                _name_cache[slack_id] = name
-                return name
-        except Exception:
-            pass
-        _name_cache[slack_id] = slack_id
-        return slack_id
+    name_map = _creator_display_names(events)
 
     # Dropdown secenekleri olustur — tarihe gore sirali
     options = []
     for evt in sorted(events, key=lambda e: (e.date, e.time)):
-        creator_name = _resolve_name(evt.creator_slack_id)
+        creator_name = name_map.get(evt.creator_slack_id, evt.creator_slack_id)
         label = f"{evt.date.strftime('%d %b')} — {evt.name} ({creator_name})"
         if len(label) > 75:
             label = label[:72] + "..."
@@ -667,27 +666,28 @@ def _handle_update(client, body: dict, user_id: str, channel_id: str) -> None:
 
 def _handle_help(client, user_id: str, channel_id: str) -> None:
     builder = MessageBuilder()
-    builder.add_header("Event Komutları")
-    builder.add_text(
-        "*`/event create`*\n"
-        "Yeni etkinlik talebi oluştur. Form açılır, admin onayından sonra duyuru yapılır.\n\n"
-        "*`/event list`*\n"
-        "Bu ayın yaklaşan etkinliklerini listele.\n\n"
-        "*`/event my_list`*\n"
-        "Kendi oluşturduğum etkinlikleri listele.\n\n"
-        "*`/event history`*\n"
-        "Geçmiş etkinlikleri görüntüle.\n\n"
-        "*`/event add_me`*\n"
-        "İlgi formu açar. Önümüzdeki 1 ay içinde gerçekleşecek ve henüz ilgi göstermediğiniz "
-        "etkinlikler listelenir. Her etkinliğe 1 kez ilgi gösterilebilir.\n\n"
-        "*`/event update`*\n"
-        "Güncelleme formu açar. Etkinlik sahibi kendi etkinliklerini görüp güncelleyebilir.\n\n"
-        "*`/event cancel`*\n"
-        "İptal formu açar. Etkinlik sahibi kendi etkinliklerini görüp iptal edebilir.\n\n"
-        "*`/event help`*\n"
-        "Bu yardım mesajını göster."
-    )
+    builder.add_header("Yardım — Etkinlik ve İngilizce")
+    lim_note = ""
+    if settings.event_max_pending_per_user > 0:
+        q = settings.event_max_pending_per_user
+        lim_note = (
+            f"_Aynı anda en fazla {q} bekleyen talebiniz tutulabilir "
+            "(`EVENT_MAX_PENDING_PER_USER`)._\n\n"
+        )
+    builder.add_text(english_help_mrkdwn())
     builder.add_divider()
-    builder.add_context(["_Etkinlik ID'sini `/event list` ile öğrenebilirsin_"])
+    builder.add_text(event_help_mrkdwn(limit_note=lim_note))
+    builder.add_divider()
+    builder.add_context(
+        [
+            "_Etkinlik ID'sini `/event list` ile öğrenebilirsiniz._ "
+            "Tüm servisler için genel özet: `/help`",
+        ]
+    )
 
-    client.chat_postEphemeral(channel=channel_id, user=user_id, text="Event Komutları", blocks=builder.build())
+    client.chat_postEphemeral(
+        channel=channel_id,
+        user=user_id,
+        text="Yardım — Etkinlik ve İngilizce",
+        blocks=builder.build(),
+    )

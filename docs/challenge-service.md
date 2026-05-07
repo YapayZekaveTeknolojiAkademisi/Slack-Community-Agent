@@ -41,14 +41,15 @@ python -m services.challenge_service --fresh
 
 ```
 1. Background async event loop → ayrı thread
-2. PostgreSQL bağlantısı
-3. Slack Bolt handler'larının kayıt edilmesi
-4. Service Manager başlatılır:
+2. PostgreSQL bağlantısı (`db.initialize`)
+3. challenge_types seed: `seeds/*.json` okunur; `CHT-*` id DB’de yoksa eklenir, varsa atlanır — `packages/challenge_type_seeds.py` (JSON hatası veya doğrulama hatasında servis başlamaz)
+4. Slack Bolt handler'ların kayıt edilmesi (__main__.py import sırasında)
+5. Service Manager başlatılır:
    a. DB temizliği (moda göre)
    b. ChannelRegistry rebuild (DB'den)
    c. Monitörler başlatılır
-5. Startup bildirimleri Slack'e gönderilir
-6. Slack Socket Mode başlar (blocking)
+6. Startup bildirimleri Slack'e gönderilir
+7. Slack Socket Mode başlar (blocking)
 ```
 
 ---
@@ -338,10 +339,23 @@ Tekrarlanan başarısız eşleşmeler bekleme süresini azaltır (öncelik düş
 
 ### Kayıt Türleri
 
-- **Challenge kanalları** — `STARTED` ve `COMPLETED` durumundaki challenge'lar
-- **Değerlendirme kanalları** — `IN_EVALUATION` ve `EVALUATION_DELAYED` durumundaki challenge'lar
+- **Challenge kanalları** — yalnızca `STARTED` (aktif takım Slack kanalı; `challenge_channel_id` dolu olanlar). `COMPLETED` sonrası bu kanal arşivlenir ve kayıtta tutulmaz.
+- **Değerlendirme kanalları** — `evaluation_channel_id` dolu olduğu sürece: teslim sonrası jüri bekleyen `COMPLETED`, ayrıca `IN_EVALUATION` ve `EVALUATION_DELAYED`. Takım üye listesi için DB kullanılır; teslim sırasında `challenge_channel_id` DB'de sıfırlanır ve registry'de pch kaldırılır.
 
-Teslim alındığında `transition_challenge_to_evaluation()` ile challenge kaydı değerlendirme kaydına dönüştürülür (atomik işlem).
+Teslim sırasında değerlendirme kaydı oluşturulur (`register_evaluation`, jüri listesi başta boş). Jüri atanınca aynı kayıt güncellenir (`set_evaluation_jury`).
+
+### Kullanıcı bağlılığı (`is_user_engaged`)
+
+**Dosya:** `services/challenge_service/manager.py` (registry kısmı: `services/challenge_service/core/engagement.py` içindeki `engaged_from_registry_channel_views`)
+
+`/challenge join`, `/challenge start` ve modal akışları kullanıcının zaten meşgul olup olmadığını buradan sorar. Kontrol sırası:
+
+1. Kategori kuyrukları (`CustomQueue`)
+2. Pending grup (bekleyen eşleşme)
+3. Challenge registry — `members` içinde Slack ID (yalnızca `STARTED` takım kanalı)
+4. Evaluation registry — `members` içinde Slack ID (teslim sonrası + aktif değerlendirme; jüri beklerken dahil), veya `jury` içinde Slack ID
+
+`COMPLETED` + jüri bekliyor durumunda takım yalnızca değerlendirme kaydında tutulduğundan, yeni challenge’a izin verilmez ve `/challenge leave` bu durumda kuyruk çıkışı için geçerli değildir (kullanıcıya ayrı ephemeral metin gösterilir).
 
 ---
 
@@ -357,9 +371,17 @@ Teslim alındığında `transition_challenge_to_evaluation()` ile challenge kayd
 | `SLACK_APP_TOKEN` | Socket Mode token (`xapp-...`) | Evet |
 | `SLACK_USER_TOKEN` | Kullanıcı token — kanal oluşturma için (`xoxp-...`) | Evet |
 | `SLACK_ADMINS` | Virgülle ayrılmış admin Slack ID listesi | Evet |
-| `SLACK_COMMAND_CHANNELS` | Virgülle ayrılmış komut kanalı ID listesi | Evet |
+| `SLACK_COMMAND_CHANNELS` | Virgülle ayrılmış komut kanalı ID listesi | Hayır |
+| `SLACK_CHALLENGE_CHANNEL` | Challenge komutlarının ana topluluk kanalı (`C...`) | Evet |
+| `SLACK_ADMIN_CHANNEL` | Operasyon günlüğü (emoji yok, kısaltmalı `[CHG]` satırları) | Evet |
+| `SLACK_ANNOUNCEMENT_CHANNEL` | Yeni challenge uzun duyurusu; boşsa `SLACK_CHALLENGE_CHANNEL` | Hayır |
 | `SLACK_STARTUP_CHANNEL` | Başlangıç bildirim kanalı | Hayır |
 | `SLACK_REPORT_CHANNEL` | Rapor kanalı | Hayır |
+
+**Bildirim ayrımı**
+
+- **Admin kanalı** (`SLACK_ADMIN_CHANNEL`): challenge başlangıcı, teslim sonrası eval açılışı, süre dolumu / bırakma, jüri tamamı, servis açılış/kapanış. Satırlar `[CHG] ETİKET| ...` biçiminde; emoji yok; kısaltmalar: `EVT` olay, `YAP` yapıldı, `SRB` sıradaki adım, `KT` katılımcılar, `RSN` neden (`surrender` / `deadline`).
+- **Topluluk duyuru**: yeni challenge başladığında Block Kit ile uzun açıklama `SLACK_ANNOUNCEMENT_CHANNEL` doluysa oraya, değilse `SLACK_CHALLENGE_CHANNEL` kanalına gider (emoji serbest). Özel challenge kanalındaki karşılama mesajı ayrıca kalır.
 
 ### Veritabanı
 

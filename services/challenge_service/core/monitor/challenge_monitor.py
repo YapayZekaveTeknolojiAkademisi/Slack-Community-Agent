@@ -10,8 +10,6 @@ from ..queue.channel_registry import ChannelRegistry, ChannelRecord
 
 settings = get_settings()
 
-_PENDING_TTL_MINUTES = 30
-
 
 class ChallengeMonitor:
     """
@@ -39,7 +37,7 @@ class ChallengeMonitor:
         if self._running:
             return
         self._running = True
-        self._bot_user_id = slack_helper.get_bot_user_id()
+        self._bot_user_id = await asyncio.to_thread(slack_helper.get_bot_user_id)
         self._task = asyncio.create_task(self._run_loop())
         _logger.info("[MON] Challenge monitor up (%ss)", self._interval)
 
@@ -69,14 +67,15 @@ class ChallengeMonitor:
         for channel_id, record in {**challenges, **evaluations}.items():
             await self._check_channel(channel_id, record)
 
-        self._cleanup_stale_pending()
+        await self._cleanup_stale_pending()
 
-    def _cleanup_stale_pending(self) -> None:
+    async def _cleanup_stale_pending(self) -> None:
         """TTL'i geçmiş pending challenge'ları temizler, katılımcıları kuyruğa geri alır."""
-        from ...core.queue.challenge_queue import QueueItem  # circular import'tan kaçın
+        from ...core.queue.challenge_queue import QueueItem
         from ...manager import service_manager  # noqa: circular — safe (singleton zaten yaratılmış)
 
-        cutoff = datetime.now(timezone.utc) - timedelta(minutes=_PENDING_TTL_MINUTES)
+        ttl = get_settings().pending_challenge_ttl_minutes
+        cutoff = datetime.now(timezone.utc) - timedelta(minutes=ttl)
         expired: list[tuple[str, dict]] = []
 
         with self._pending_lock:
@@ -97,45 +96,55 @@ class ChallengeMonitor:
                     requeued.append(uid)
             _logger.warning(
                 "[MON] Stale pending %s expired (%s, %d participants, requeued=%d)",
-                pid, cat_label, len(participants), len(requeued),
+                pid,
+                cat_label,
+                len(participants),
+                len(requeued),
             )
-            # Ortak kanala bildirim
             if requeued:
                 try:
                     mentions = " ".join(f"<@{uid}>" for uid in requeued)
-                    slack_helper.post_public_message(
-                        settings.slack_challenge_channel,
+                    text = (
                         f"{mentions}\n\n"
-                        f"*{cat_label}* bekleme listeniz {_PENDING_TTL_MINUTES} dakika dolduğu için iptal edildi.\n"
-                        "Kuyruğa geri alındınız — `/challenge join` ile tekrar katılabilirsiniz.",
+                        f"*{cat_label}* bekleme listeniz {ttl} dakika dolduğu için iptal edildi.\n"
+                        "Kuyruğa geri alındınız — `/challenge join` ile tekrar katılabilirsiniz."
+                    )
+                    await asyncio.to_thread(
+                        slack_helper.post_public_message,
+                        settings.slack_challenge_channel,
+                        text,
                     )
                 except Exception as e:
                     _logger.warning("[MON] Could not notify expired pending participants: %s", e)
 
     async def _check_channel(self, channel_id: str, record: ChannelRecord) -> None:
         """Tek bir kanaldaki yetkisiz kullanıcıları temizler."""
-        # Yetkili ID listesini hazırla
         authorized_ids = self._get_authorized_ids(record)
 
         try:
-            # Kanaldaki mevcut üyeleri getir
-            # Not: conversations_members bot token ile çalışırsa sadece botun olduğu kanalı görür,
-            # slack_helper.user_client kullanarak tüm private kanalları görebiliriz.
-            resp = slack_helper.user_client.conversations_members(channel=channel_id)
+            resp = await asyncio.to_thread(
+                slack_helper.user_client.conversations_members,
+                channel=channel_id,
+            )
             if not resp.get("ok"):
                 _logger.error("Failed to fetch members for %s: %s", channel_id, resp.get("error"))
                 return
-            
+
             actual_members = resp.get("members", [])
             intruders = [uid for uid in actual_members if uid not in authorized_ids]
 
             for intruder_id in intruders:
                 _logger.warning("[SEC] Intruder kicked: %s in %s", intruder_id, channel_id)
                 try:
-                    slack_helper.user_client.conversations_kick(channel=channel_id, user=intruder_id)
-                    slack_helper.send_announcement(
-                        channel_id=channel_id,
-                        text=f"⚠️ <@{intruder_id}> yetkisiz erişim nedeniyle kanaldan uzaklaştırıldı."
+                    await asyncio.to_thread(
+                        slack_helper.user_client.conversations_kick,
+                        channel=channel_id,
+                        user=intruder_id,
+                    )
+                    await asyncio.to_thread(
+                        slack_helper.send_announcement,
+                        channel_id,
+                        f"⚠️ <@{intruder_id}> yetkisiz erişim nedeniyle kanaldan uzaklaştırıldı.",
                     )
                 except Exception as e:
                     _logger.error("Failed to kick %s from %s: %s", intruder_id, channel_id, e)
@@ -151,7 +160,7 @@ class ChallengeMonitor:
             ids.add(record.admin_slack_id)
         if self._bot_user_id:
             ids.add(self._bot_user_id)
-        
+
         if settings.slack_admin_slack_id:
             ids.add(settings.slack_admin_slack_id)
         if settings.slack_workspace_owner_id:

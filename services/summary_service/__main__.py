@@ -2,42 +2,52 @@
 Summary Service — Entry Point
 
 Başlatma sırası:
-  1. Logger başlat
-  2. Handler'ları kayıt et (@app.command + @app.action dekoratörleri)
-  3. Slack Socket Mode başlat (blocking)
-  4. SIGINT/SIGTERM → graceful shutdown
+  1. Logger
+  2. SIGINT/SIGTERM → `stop` olayı (minimal sinyal işleyici)
+  3. Bolt handler kayıtları (import)
+  4. Slack Socket Mode `connect()` (blocking değil — `start()` yerine)
+  5. Ana thread `stop.wait()` — sinyal gelince `close()` + çıkış
+
+Kapanış:
+  - `socket_handler.close()` (WebSocket + işçiler)
+  - Aynı yaşam döngüsü `packages.slack.socket_runtime` ile challenge ile hizalanır.
 """
 from __future__ import annotations
 
-import signal
 import sys
+import threading
 
-from services.summary_service.logger import _logger  # noqa: F401 — start_logging (once)
 from packages.slack.client import slack_client
-from services.summary_service import handlers as _handlers  # noqa: F401
+from packages.slack.socket_runtime import (
+    close_socket_mode_safe,
+    connect_socket_mode,
+    install_stop_signals,
+)
 
+from services.summary_service import handlers as _handlers  # noqa: F401 — handler kaydı
+from services.summary_service.logger import _logger  # noqa: F401 — start_logging
 
-def _handle_signal(sig: int, _frame) -> None:
-    _logger.info(
-        "[Summary Service] Signal %s received, shutting down...",
-        signal.Signals(sig).name,
-    )
-    sys.exit(0)
+_SERVICE = "[Summary Service]"
 
 
 def main() -> None:
-    signal.signal(signal.SIGINT, _handle_signal)
-    signal.signal(signal.SIGTERM, _handle_signal)
+    stop = threading.Event()
+    install_stop_signals(stop, _logger, _SERVICE)
 
-    _logger.info("[Summary Service] Handlers registered")
+    _logger.info("%s Phase 1/3: Logger initialized", _SERVICE)
+    _logger.info("%s Phase 2/3: Slack command handlers registered", _SERVICE)
 
-    # Slack Socket Mode başlat (blocking)
-    _logger.info("[Summary Service] Starting Slack Socket Mode...")
     try:
-        slack_client.socket_handler.start()
+        connect_socket_mode(slack_client.socket_handler, _logger, _SERVICE)
+        _logger.info("%s Phase 3/3: Running — send SIGINT or SIGTERM to stop", _SERVICE)
+        stop.wait()
     except Exception as exc:
-        _logger.critical("[Summary Service] Socket Mode failed: %s", exc, exc_info=True)
+        _logger.critical("%s Socket Mode failed: %s", _SERVICE, exc, exc_info=True)
         sys.exit(1)
+    finally:
+        _logger.info("%s Shutting down...", _SERVICE)
+        close_socket_mode_safe(slack_client.socket_handler, _logger, _SERVICE)
+        _logger.info("%s Exited cleanly", _SERVICE)
 
 
 if __name__ == "__main__":

@@ -1,0 +1,199 @@
+{
+  "challenge_types": [
+    {
+      "id": "CHT-practice-async-task-layer",
+      "category": "practice",
+      "name": "Arka plan işler: asyncio TaskGroup veya asyncio.Queue",
+      "description": "Uygulamanız içinde sıra ve iptal politikasıyla birkaç eş zamanlı iş yürüten net bir katman tasarlayın (harici süreç yoksa simulated I/O kullanın).",
+      "deadline_hours": 48,
+      "points": 52,
+      "checklist": [
+        "Uzun süren bir iş iptal isteği geldiğinde ya `CancelledError` ile düzgün kapanılıyor ya da siz kendi iptal işaretçinizi tanımlayıp döngüleri erken çıkarıyorsunuz — hangisini seçtiğinizi README’de yazın.",
+        "Kuyruğun sınırsız büyümesini engellemek için üst bir sınır (maksimum uzunluk) koyun ve kuyruk dolduğunda ne yapılacağını açıklayın (geri çevirme, bekleme, isteği atlama vb.).",
+        "Her tamamlanan veya iptal olan iş için en az tarih-zaman içeren düz bir log satırı veya sayaç üretin.",
+        "README’de “iş sırasına nasıl girdiği, paralel olarak kaç işin çalıştığı ve iptalde ne olduğu” ikişer cümleyle veya küçük bir çizgi diyagram ile açıklansın.",
+        "Üç otomatik test senaryosu: (1) tüm işler başarıyla biter (2) bir iş iptal edilirken diğeri bitirilebiliyor (3) beklenmedik özel durum fırlatıldığında katman zarar görmeden kapanıyor."
+      ],
+      "meta": {
+        "difficulty": "intermediate",
+        "topic": "asyncio"
+      }
+    },
+    {
+      "id": "CHT-practice-retries-idempotency",
+      "category": "practice",
+      "name": "HTTP istemci: exponential backoff ve idempotent retry",
+      "description": "`httpx` veya Requests ile güvenilir istemci sarmalayıcı; `Retry-After` ve 429 için geri çekilme; GET dışında idempotent uçların nasıl seçileceği.",
+      "deadline_hours": 36,
+      "points": 52,
+      "checklist": [
+        "Bekleme süresi her denemede sabit çarpanla tek başına değil, küçük rastgele bir ek süre (jitter) ile artırılabilsin; başlangıç gecikmesi, üst sınır ve çarpanı yapıdan veya ortam değişkeninden değiştirilebilir olsun.",
+        "Her çağrı için üst zaman sınırlaması tanımlandığını yazın; isterseniz peş peşe hatalarda devreyi kesmek için (circuit breaker tarzı) basit ek kural dokümante edin — uygulanmadıysa README bunu özellikle belirtsin.",
+        "Sunucunun cevapsız olduğu ya da HTTP 429/503 döndüğü yapay senaryolarda doğrulanmış pytest veya maket sunucusu örnekleri ekleyin.",
+        "Gerçek URL’nin günlükte tam görünmemesi için basit bir maskeleme veya parametre sırası yaklaşımı açıklanmış olsun.",
+        "README’ye şu başlık altında en az üç madde yazın: «Bu istemci sarmalayıcı neyi garanti etmez?» (örnek: bağlantı koptuğunda kesin sürede teslim, sunucunun her hatasında yeniden deneme vb.)."
+      ],
+      "meta": {
+        "difficulty": "intermediate",
+        "topic": "reliability"
+      }
+    },
+    {
+      "id": "CHT-practice-rag-skeleton",
+      "category": "practice",
+      "name": "RAG iskelesi: chunked embedding + cosine arama",
+      "description": "Küçük bir metin koleksiyonunu parçalayıp gömerek (yerel küçük model veya sağlanan API ile) cosine benzerlikle top-k getirin; LLM zorunlu değildir.",
+      "deadline_hours": 72,
+      "points": 58,
+      "checklist": [
+        "Metni parçalara bölerken parça uzunluğu ve örtüşme (overlap) değerlerini seçtiğiniz gerekçe ile README’ye yazın (çok küçük: bağlam kopar, çok büyük: gürültü artar vb.).",
+        "Embeddings üretimi ve vektör indeksinin sıfırdan oluşturulması için tekrarlanabilir tek komut (Makefile hedefi, CLI bayrağı veya script adı açık) verin.",
+        "Örnek bir kullanıcı sorusu için çıktınız hem metin özeti hem de hangi doküman parçalarından geldiği (parça kimliği veya dosya/satır işareti) içersin.",
+        "Veri miktarı büyüdüğünde basit yaklaşımla (sıralı tam tarama) veya yaklaşık arama için hangi yaklaşımın uygun olduğunu ve neden seçtiğinizi kısa bir paragrafla açıklayın.",
+        "Hangi üçüncü parti veya yerel anahtarların hangi ortam değişkeninde tutulacağını içeren güvenli bir `.env.example` veya liste sunun."
+      ],
+      "meta": {
+        "difficulty": "advanced",
+        "topic": "rag"
+      }
+    },
+    {
+      "id": "CHT-practice-api-versioning-compat",
+      "category": "practice",
+      "name": "API sürümleme: iki major birlikte",
+      "description": "`/v1` ve `/v2` paralel yaşasın; v1 alanları deprecated header veya changelog ile işaretlenebilsin; istemci kırığı olmadan küçük evrim gösterisi.",
+      "deadline_hours": 44,
+      "points": 52,
+      "checklist": [
+        "Sunucu, arkada aynı iş mantığı veya veri katmanından beslenerek hem `/v1/...` hem `/v2/...` yollarından iki farklı JSON yapısı sunabildiğini gösterir; iki sürüm arasında ortak katmanların nasıl ayrıştığı kısa açıklansın.",
+        "`CHANGELOG` veya eşdeğeri bir dökümanda ilk sürümden sonrakine yapılmış kırıcı değişiklik üç madde yazılmış olsun.",
+        "`/v1` için sabit beklenen yanıtları doğrulayan otomatik testler yazılmış olsun; bu testler gelecek refactor’da kırılırsa anlaşılacak şekilde isimlenmiş.",
+        "`v2` çıktılarının gelecekte değişebilecek alanlarını nasıl ve ne zaman bildireceğiniz README’ye yazın (Deprecation başlığı, isteğe bağlı HTTP uyarısı, tarih politikasından biri bile yeterli).",
+        "`make smoke` tarzında tek bir komutta hangi adreslerde ne kadar doğrulanacağı listelenmiş olsun ya da küçük bir bash/python script olarak verilmiş olsun."
+      ],
+      "meta": {
+        "difficulty": "intermediate",
+        "topic": "api_design"
+      }
+    },
+    {
+      "id": "CHT-practice-feature-flags-rollout",
+      "category": "practice",
+      "name": "Feature flag ile kademeli açma ve ölçüm",
+      "description": "Sabit yüzdeli veya allowlist ile bir davranışı iki koda bölen mekanizma; çıktılar log/metric olarak ayrılabilir.",
+      "deadline_hours": 36,
+      "points": 52,
+      "checklist": [
+        "Gerçek bir bayrak ürünü (LaunchDarkly vb.) bağlamayı zorunlu tutmadan bile tutarlı bir “bayrak kimliği + açık/kapalı kararı nasıl saklanır” arabiriminiz olsun; bellek içinde tutulması kabul görür.",
+        "Yalnızca belirli kullanıcı veya kullanıcı listesi için yeni kod yolu açılacak bir allowlist seçeneği var ise nasıl doğrulanacağı yazılı olsun.",
+        "Bayrak kapalıyken kodun her zaman eski güvenilir davranışa döndüğünü doğrulayan en az iki test yazın.",
+        "Her istekte veya seçilen örneklenmiş isteklerde bayrak adıyla birlikte sayaç artırma veya log satırı basma mekanizması anlatılmış olsun.",
+        "Acil olarak yeni özelliği tamamen kesmek için nasıl güncelleme yapılacağı üç adımla runbook olarak README’ye yazın."
+      ],
+      "meta": {
+        "difficulty": "intermediate",
+        "topic": "release_engineering"
+      }
+    },
+    {
+      "id": "CHT-practice-ds-sklearn-pipeline-metrics",
+      "category": "practice",
+      "name": "scikit-learn Pipeline + doğrulama metrikleri",
+      "description": "Tablolu bir veri setinde (geriçek veya üretilmiş) preprocessing + modeli `Pipeline` içinde birleştirin; `cross_val_score` veya `StratifiedKFold` ile hold-out dışında çapraz doğrulama yapın.",
+      "deadline_hours": 44,
+      "points": 54,
+      "checklist": [
+        "`train_test_split` veya zaman serisi uyumsuzluğu varsa zaman bazlı ayırım — hangisini seçtiğiniz ve nedeni README’de.",
+        "`StandardScaler`, `SimpleImputer` ve kategorikler için `OneHotEncoder` (veya eşdeğeri) dahil tek `ColumnTransformer + Pipeline`; hiperparametre taraması şart değil ama en az iki model veya parametre seçimi karşılaştırması yapın.",
+        "Raporlayın: doğruluk, F1 (veya regresyon için MAE/RMSE) hem CV ortalaması hem ayrı tutulan test setinde.",
+        "Özellik sızıntısı yapmayacağınızı (ölçekleçin yalnızca train üzerinde fit edildiğini) kısa paragrafla açıklayın.",
+        "`pytest` veya küçük sentetik veri ile pipeline’ın en az iki edge-case’te düzgün çalıştığını test edin."
+      ],
+      "meta": {
+        "difficulty": "intermediate",
+        "topic": "machine_learning_engineering",
+        "stack_hint": "sklearn"
+      }
+    },
+    {
+      "id": "CHT-practice-ai-tfidf-semantic-lite",
+      "category": "practice",
+      "name": "Metin benzerlik: TF-IDF + kosinüs ile top-k arama",
+      "description": "10–500 kısa belgeden oluşan bir koleksiyonda sorguya en yakın belgeleri TF-IDF vektörleri + cosine ile döndürün; embedding API’si kullanmak zorunlu değil.",
+      "deadline_hours": 36,
+      "points": 55,
+      "checklist": [
+        "`TfidfVectorizer` parametreleri (ngram, min_df veya max_df) seçim gerekçeniz README’de yazılmış olsun.",
+        "`transform` sırasında sorgunun train-only fit edilmiş vektör uzayına nasıl projeksiyonu yapıldığını doğrulayın (yeniden tam fit etmek yok).",
+        "Çıktı hem skor sıralaması hem en az iki belge için kısa alıntı veya kimlik dizgesi içersin.",
+        "Boş veya tek kelimelik sorguda boş liste veya anlamlı varsayılan davranışı belgeleyin.",
+        "Tek komutla vektörleştirilmiş matrisi yeniden oluşturan bir Makefile veya CLI talimatı verin."
+      ],
+      "meta": {
+        "difficulty": "intermediate",
+        "topic": "nlp_information_retrieval",
+        "stack_hint": "sklearn"
+      }
+    },
+    {
+      "id": "CHT-practice-ds-polars-vs-pandas-benchmark-note",
+      "category": "practice",
+      "name": "Polars ile büyükçe tablo: filtre-grup-sum + pandas kıyas notu",
+      "description": "En az yüz bin satır sentetik veya gerçek veri ile Polars kullanarak grupla-özet akışı yazın; aynı işlemi pandas ile daha küçük alt örnekle veya zamanlayarak kabaca kıyaslayın.",
+      "deadline_hours": 32,
+      "points": 53,
+      "checklist": [
+        "Sentetik veri üretiyorsanız sütun tipleri (kategorik, tarih, sayısal) gerçekçi dağılımlarla seçilmiş olsun.",
+        "`scan_csv`/`read_csv`, `lazy` veya eager seçiminiz ile en az üç adımlık zincir (filtre → group_by → aggregation) yazın.",
+        "Sonuç DataFrame ile birlikte bellek/tekrar süre notu için basit zaman ölçümü (notebook veya `time.perf_counter`) ekleyin.",
+        "pandas tarafında aynı mantığın nasıl yazıldığını gösterir kısa bir snippet ve tek paragraflık «ne zaman Polars mantıklı» özeti yazın.",
+        "Polars ve pandas için sabitlenmiş sürümleri `requirements.txt` içinde verin."
+      ],
+      "meta": {
+        "difficulty": "intermediate",
+        "topic": "data_engineering_performance",
+        "stack_hint": "polars"
+      }
+    },
+    {
+      "id": "CHT-practice-ai-llm-json-schema-retry",
+      "category": "practice",
+      "name": "LLM çıktısı: şema doğrulama + sınırlı yeniden deneme",
+      "description": "Bir kullanıcı sorusundan JSON üretimi isteyin; Pydantic (v2) modeli ile parse edin, başarısızsa tek veya iki kez daha deneyerek (sıcaklık veya sistem mesajı sabit) güvenilir yapı çıktısı üretin.",
+      "deadline_hours": 40,
+      "points": 56,
+      "checklist": [
+        "Beklenen JSON şemasını `BaseModel` veya `TypeAdapter` ile tanımlayın; ísteğe bağlı alanlar ve tür doğrulamaları açıklanmış olsun.",
+        "Ham model çıktısı JSON değilse veya doğrulama patlarsa en fazla iki yeniden deneme politikanız kod ve README’de madde olarak yazılı olsun.",
+        "API anahtarı ve uç adresi ortam değişkeninden; testler için `pytest` ile sahte istemci veya saklanmış deterministik model cevapları kullanın.",
+        "Başarılı ve üçüncü denemede de başarısız senaryo için günlük/print düzeyinde gözlem (ham içerik kısaltılmış) içeren küçük senaryolar.",
+        "Hallüsinasyonu çözmez; yalnızca «geçerli şekil» garantisi sağladığınızı README’ye dürüstçe yazın."
+      ],
+      "meta": {
+        "difficulty": "advanced",
+        "topic": "llm_application_engineering",
+        "stack_hint": "openai_compatible_or_mock"
+      }
+    },
+    {
+      "id": "CHT-practice-ds-timeseries-baseline-eval",
+      "category": "practice",
+      "name": "Zaman serisi: naive / hareketli ortalama baseline + MAE",
+      "description": "Tek değişkenli günlük veya saatlik dizi kullanın; train sonrası gelecek için naive last-value ve bir hareketli ortalama tahmincisini kodlayın; tutulan testte MAE gösterin.",
+      "deadline_hours": 38,
+      "points": 53,
+      "checklist": [
+        "Zaman sırasına duyarlı ayırım: geleceği tahmin etmek için geçmişe bakılmalı; rasgele shuffle kullanılmamalı — README bunu özelliklere vurgulasın.",
+        "En az iki baseline: «son gözlem» ve pencereli ortalama; pencere seçim gerekçeniz yazılı olsun.",
+        "`sklearn.metrics.mean_absolute_error` veya equivalent ile tutulan aralıkta hata karşılaştırması.",
+        "Grafik veya küçük tabloyla tahmin ile gerçek değişkeni zaman ekseninde gösterin.",
+        "`pytest` ile sentetik kısa dizi üzerinde MAE’nin sıfır veya beklenen bilinen bir değere indiği en az bir test yazın."
+      ],
+      "meta": {
+        "difficulty": "intermediate",
+        "topic": "time_series_ml",
+        "stack_hint": "pandas_numpy"
+      }
+    }
+  ]
+}

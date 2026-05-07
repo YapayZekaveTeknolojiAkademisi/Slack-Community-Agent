@@ -74,6 +74,15 @@ class EventRepository(BaseRepository[Event]):
         )
         return list(result.scalars().all())
 
+    async def count_pending_by_creator(self, slack_id: str) -> int:
+        """Kullanicinin onay bekleyen (PENDING) etkinlik talebi sayisi."""
+        result = await self.session.execute(
+            select(func.count())
+            .select_from(Event)
+            .where(Event.creator_slack_id == slack_id, Event.status == EventStatus.PENDING)
+        )
+        return int(result.scalar_one())
+
     async def list_history(self) -> list[Event]:
         """Gecmis etkinlikler (COMPLETED + CANCELLED)."""
         result = await self.session.execute(

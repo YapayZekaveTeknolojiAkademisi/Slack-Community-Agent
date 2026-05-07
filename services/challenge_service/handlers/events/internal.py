@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 
 from slack_bolt import Ack, App
 from sqlalchemy import select
+from sqlalchemy.orm import joinedload
 
 from packages.database.manager import db
 from packages.database.models.challenge import Challenge, ChallengeJuryMember, ChallengeStatus
@@ -16,12 +17,51 @@ from packages.slack.blocks.builder import MessageBuilder
 from packages.slack.client import slack_client
 from ...api.state import active_state
 from ...core.event_loop import run_async
+from ...core.queue.channel_registry import ChannelRecord, _slack_ids_from_team
 from ...logger import _logger
 from ...manager import service_manager
+from ...utils.notifications import notify_challenge_closed_admin, notify_challenge_submitted_admin
 from ...utils.slack_helpers import slack_helper
 from ...utils.slack_user_sync import get_or_create
 
 app: App = slack_client.app
+
+
+async def _challenge_tpl_snapshot(challenge_id: str) -> dict:
+    """Admin bildirimi için şablon/kategori özeti (salt okuma)."""
+    async with db.session(read_only=True) as session:
+        ch = await session.get(
+            Challenge,
+            challenge_id,
+            options=[joinedload(Challenge.challenge_type)],
+        )
+        if not ch or not ch.challenge_type:
+            return {
+                "category_label": "—",
+                "type_id": None,
+                "type_name": None,
+                "points": None,
+            }
+        ct = ch.challenge_type
+        return {
+            "category_label": ct.category.value.replace("_", " ").title(),
+            "type_id": ct.id,
+            "type_name": ct.name,
+            "points": ct.points,
+        }
+
+
+async def _team_slack_ids_for_challenge(challenge_id: str) -> list[str]:
+    """Takım Slack ID'leri (registry yerine DB; teslim sonrası pch kaydı silinir)."""
+    async with db.session(read_only=True) as session:
+        ch = await session.get(
+            Challenge,
+            challenge_id,
+            options=[joinedload(Challenge.challenge_team_members)],
+        )
+        if not ch:
+            return []
+        return _slack_ids_from_team(ch)
 
 
 @app.action("open_submission_modal")
@@ -156,6 +196,8 @@ def handle_team_submission_view(ack: Ack, body: dict, client, view):
         # Modal gönderimi sırasında body'de channel yok; challenge kanalına ephemeral gönder
         try:
             record = service_manager.registry.get_challenge_by_challenge_id(challenge_id)
+            if not record:
+                record = service_manager.registry.get_evaluation_by_challenge_id(challenge_id)
             if record:
                 slack_helper.post_ephemeral_or_dm(
                     channel_id=record.channel_id,
@@ -179,11 +221,24 @@ def handle_team_submission_view(ack: Ack, body: dict, client, view):
         _logger.error("[EVT] Could not open eval channel for challenge=%s", updated.id)
         return
 
+    arch_ch_id = updated.challenge_channel_id or ""
+    snap = run_async(_challenge_tpl_snapshot(str(updated.id)))
+    notify_challenge_submitted_admin(
+        challenge_id=str(updated.id),
+        archived_challenge_channel_id=arch_ch_id,
+        eval_channel_id=eval_channel_id,
+        submitted_by_slack_id=user_id,
+        category_label=snap["category_label"],
+        challenge_type_id=snap["type_id"],
+        challenge_type_name=snap["type_name"],
+        points=snap["points"],
+        github_url_trim=github_url.strip(),
+    )
+
     # 2. Jüri ata (eval kanalı zaten açık)
     assigned = run_async(
         _assign_jury_to_challenge(
             challenge_id=str(updated.id),
-            challenge_channel_id=updated.challenge_channel_id,
             eval_channel_id=eval_channel_id,
             submission_info={"github_url": github_url, "description": description},
         )
@@ -199,15 +254,14 @@ async def _open_eval_channel(
     """
     Submission sonrası değerlendirme kanalını hazırlar:
       1. Eval kanalı oluşturur.
-      2. Admin + ekip üyelerini davet eder.
+      2. Ekip üyelerini (DB) eval kanalına davet eder.
       3. Challenge kanalına son mesajı gönderir ve kanalı arşivler.
-      4. DB'de evaluation_channel_id'yi kaydeder.
-    Registry geçişi yapılmaz — jüri atanınca _assign_jury_to_challenge yapar.
+      4. DB'de evaluation_channel_id yazar, challenge_channel_id temizler.
+      5. Registry: pch kaydını siler, eval kaydını (jüri boş) ekler — jüri
+         atanınca _assign_jury_to_challenge sadece jury listesini günceller.
     Returns eval_channel_id on success, None on failure.
     """
-    # Ekip üyelerini registry'den al (jüri hariç tutmak için de lazım)
-    record = service_manager.registry.get_challenge(challenge_channel_id)
-    team_members = list(record.members) if record else []
+    team_members = await _team_slack_ids_for_challenge(challenge_id)
 
     # Eval kanalı oluştur
     eval_channel_name = f"eval-{challenge_id[:8].lower()}"
@@ -236,13 +290,14 @@ async def _open_eval_channel(
     except Exception as e:
         _logger.warning("[EVT] Could not archive challenge channel %s: %s", challenge_channel_id, e)
 
-    # DB: evaluation_channel_id kaydet
+    # DB: evaluation_channel_id kaydet, pch artık arşiv — DB'de NULL
     async def _save_eval_channel():
         async with db.session() as session:
             challenge = await session.get(Challenge, challenge_id)
             if not challenge:
                 return False
             challenge.evaluation_channel_id = eval_channel_id
+            challenge.challenge_channel_id = None
             await session.commit()
             return True
 
@@ -255,13 +310,24 @@ async def _open_eval_channel(
             pass
         return None
 
+    settings = get_settings()
+    service_manager.registry.unregister_challenge(challenge_channel_id)
+    service_manager.registry.register_evaluation(
+        ChannelRecord(
+            channel_id=eval_channel_id,
+            challenge_id=challenge_id,
+            members=list(team_members),
+            jury=[],
+            admin_slack_id=settings.slack_admin_slack_id,
+        )
+    )
+
     _logger.info("[EVT] Eval channel opened: %s for challenge=%s", eval_channel_id, challenge_id)
     return eval_channel_id
 
 
 async def _assign_jury_to_challenge(
     challenge_id: str,
-    challenge_channel_id: str,
     eval_channel_id: str,
     submission_info: dict,
     *,
@@ -271,14 +337,14 @@ async def _assign_jury_to_challenge(
     COMPLETED + eval kanalı açık bir challenge'a jüri kuyruğundan jüri atar.
     - Jüri üyelerini eval kanalına davet eder.
     - DB'ye ChallengeJuryMember kayıtlarını ekler.
-    - Registry'yi challenge → evaluation olarak geçirir.
+    - Registry'deki eval kaydının jüri listesini günceller (takım pch registry'de olmayabilir).
     Returns True if assignment succeeded, False if deferred (not enough jury).
     """
     settings = get_settings()
     needed = settings.evaluation_jury_count
 
-    record = service_manager.registry.get_challenge(challenge_channel_id)
-    exclude_ids = set(record.members) if record else set()
+    team_ids = await _team_slack_ids_for_challenge(challenge_id)
+    exclude_ids = set(team_ids)
 
     available = service_manager.jury_queue.count_excluding(exclude_ids)
     if available < needed:
@@ -347,6 +413,7 @@ async def _assign_jury_to_challenge(
                 "name": ct.name if ct else None,
                 "description": ct.description if ct else None,
                 "deadline_hours": ct.deadline_hours if ct else None,
+                "points": ct.points if ct else None,
                 "checklist": list(ct.checklist or []) if ct else [],
                 "category": ct.category.value.replace("_", " ").title() if ct else None,
             } if ct else None
@@ -361,12 +428,22 @@ async def _assign_jury_to_challenge(
             service_manager.jury_queue.add(item)
         return False
 
-    # Registry: challenge → evaluation geçişi
-    service_manager.registry.transition_challenge_to_evaluation(
-        challenge_id=challenge_id,
-        evaluation_channel_id=eval_channel_id,
-        jury=jury_slack_ids,
-    )
+    if not service_manager.registry.set_evaluation_jury(eval_channel_id, jury_slack_ids):
+        _logger.warning(
+            "[EVT] set_evaluation_jury miss, re-register challenge=%s eval=%s",
+            challenge_id,
+            eval_channel_id,
+        )
+        team_fallback = await _team_slack_ids_for_challenge(challenge_id)
+        service_manager.registry.register_evaluation(
+            ChannelRecord(
+                channel_id=eval_channel_id,
+                challenge_id=challenge_id,
+                members=list(team_fallback),
+                jury=list(jury_slack_ids),
+                admin_slack_id=get_settings().slack_admin_slack_id,
+            )
+        )
 
     # Evaluation kanalına bildirim — proje detayları + checklist
     jury_mentions = " ".join(f"<@{uid}>" for uid in jury_slack_ids)
@@ -388,6 +465,8 @@ async def _assign_jury_to_challenge(
                 project_lines.append(f"*📝 Proje Tanımı:* {ct['description']}")
             if ct["deadline_hours"]:
                 project_lines.append(f"*⏱ Süre:* {ct['deadline_hours']} saat")
+            if ct.get("points") is not None:
+                project_lines.append(f"*⭐ Şablon puanı:* `{ct['points']}`")
             eval_builder.add_text("\n".join(project_lines))
 
             checklist = ct["checklist"]
@@ -419,6 +498,8 @@ async def _assign_jury_to_challenge(
 
     _logger.info("[EVT] Jury assigned to challenge=%s: %s", challenge_id, jury_slack_ids)
     return True
+
+
 async def _try_assign_waiting_challenges() -> None:
     """
     Eval kanalı açılmış (evaluation_channel_id IS NOT NULL) ama jüri henüz
@@ -434,15 +515,15 @@ async def _try_assign_waiting_challenges() -> None:
         waiting = result.scalars().all()
 
     for challenge in waiting:
-        if challenge.challenge_channel_id and challenge.evaluation_channel_id:
-            submission_info = (challenge.meta or {}).get("submission", {})
-            await _assign_jury_to_challenge(
-                challenge_id=str(challenge.id),
-                challenge_channel_id=challenge.challenge_channel_id,
-                eval_channel_id=challenge.evaluation_channel_id,
-                submission_info=submission_info,
-                notify_if_insufficient=False,
-            )
+        if not challenge.evaluation_channel_id:
+            continue
+        submission_info = (challenge.meta or {}).get("submission", {})
+        await _assign_jury_to_challenge(
+            challenge_id=str(challenge.id),
+            eval_channel_id=challenge.evaluation_channel_id,
+            submission_info=submission_info,
+            notify_if_insufficient=False,
+        )
 
 
 @app.action("surrender_challenge")
@@ -486,6 +567,18 @@ def handle_surrender_challenge(ack: Ack, body: dict, client, action):
         return
 
     _logger.info("[EVT] Challenge %s surrendered by %s", challenge_id, user_id)
+
+    snap = run_async(_challenge_tpl_snapshot(challenge_id))
+    pch = surrendered.challenge_channel_id
+    notify_challenge_closed_admin(
+        challenge_id=challenge_id,
+        reason="surrender",
+        archived_channel_id=pch,
+        actor_slack_id=user_id,
+        category_label=snap["category_label"],
+        challenge_type_id=snap["type_id"],
+        challenge_type_name=snap["type_name"],
+    )
 
     if surrendered.challenge_channel_id:
         service_manager.registry.unregister_challenge(surrendered.challenge_channel_id)

@@ -1,0 +1,189 @@
+{
+  "challenge_types": [
+    {
+      "id": "CHT-real-slo-health-budget",
+      "category": "real_world",
+      "name": "SaaS ödeme API’si: latency ve hata bütçeli SLO taslağı",
+      "description": "Varsayım: «Akademi Checkout» adlı küçük bir ödeme bildirim API’siniz var (webhook + durum sorgulama). Pazartesi sabahı kampanya trafiği yüzünden p99 gecikmesi kullanıcı şikâyetine döndü ama sunucu düşmedi — yönetim «yanlış alarm değil, gerçek yaşam» istiyor. Gerçek grafan yok; tek sayfalık SLO + uyarı + ilk müdahale runbook’u yazacaksınız. Hedef kitleniz: ürün sahibi ile SRE’nin aynı dilde konuşması. Not: ürün yol haritasında ilk sırada basit bir iş kuralı ile çalışan **ince destek ajanı** (ödeme durumunu özetleyen) da var; gelecekte tek hat üzerinden LLM çağrısı ekleneceği için bütçe ve hata yüzdesini düşünmeniz bekleniyor.",
+      "deadline_hours": 40,
+      "points": 78,
+      "checklist": [
+        "Kullanıcı perspektifi: «ödeme sonucu bildirimi ortalama kaç saniye içinde görülmeli», «başarılı olmayan bildirim yeniden denendiğinde kullanıcıya ne söylenir» gibi iki üç cümlelik hikâye yazın.",
+        "En az iki ayrı SLI tanımlayın (ör. «başarılı HTTP 2xx oranı», «p95 uçtan uç gecikme») ve her birine sayısal hedef + ölçüm penceresi ekleyin (ör. «kayan 7 gün içinde p95 < 800 ms»).",
+        "**Ajan bileşeni (opsiyonel ama yazılsa iyi)** için geleceğe dönük en az bir alt-SLI yazın — örneğin «LLM/tool çağrısı zaman aşımı oranı < %x» veya «ajan yanıtlarında hallucination şüphelisi için insan onayına düşüş oranı» gibi iş dilinde tanım.",
+        "En az bir uyarı kuralında «kaç dakika üst üste ihlal» eşiği ve bu eşiğin neden gürültülü olmaktan kaçındığını iki cümlede açıklayın.",
+        "Kullanıcı trafiğinden bağımsız sentetik ping: hangi URL/path, hangi aralıkla, hangi koşul «kırmızı» sayılır — tablo veya madde halinde.",
+        "«SLO ihlali bildirimi geldi» runbook’unda: (1) ilk kontrol edilen pano/komut, (2) son yayın tarihi ve özeti, (3) gerekiyorsa trafik kısıtı veya feature flag ile geçici yumuşatma seçeneği — üç numaralı adım.",
+        "Örnek sorgu: PromQL ile veya doğal dilde yazılmış ama yeniden yazılabilir bir metrik çıkarımı (ör. «son 30 dk içinde_http_server_duration_milliseconds_quantile_bucket» benzeri isim kullanabilirsiniz)."
+      ],
+      "meta": {
+        "difficulty": "intermediate",
+        "topic": "reliability_ops",
+        "scenario_product": "payment_notification_api",
+        "ai_angle": "future_support_agent_sli"
+      }
+    },
+    {
+      "id": "CHT-real-cicd-gated-deploy",
+      "category": "real_world",
+      "name": "Küçük ekip için merge → stage → prod güvenlik kapılı CI/CD",
+      "description": "Varsayım: beş kişilik bir ekip Flask/FastAPI monorepo kullanıyor; geçen hafta `main` dalına doğrudan push yüzünden kırık migrasyon prod’a sızdı ve 45 dk geri alındı. Artık: her PR’da test + statik kontrol, `main`’e birleştirmeden sonra stage ortamına otomatik (veya manuel onay kapısı) taslağı ve sırların repoda görünmemesi şartları tanımlanacak. Küçük bütçe: tek runner, üçüncü parti self-hosted gerekmiyor. Ek bağlam: ekip yakında dahili kullanıcıya açılan **Slack içi triyaj ajanı** için ayrı deploy hedefi ekliyor; model ve araç politikası baskısı nedeniyle bu servis için de aynı hattaki bir «davranış regresyonu» koridoru gerekiyor.",
+      "deadline_hours": 44,
+      "points": 74,
+      "checklist": [
+        "`main` için dal koruma özeti yazın: kim doğrudan push yapabilir mi, yapılmamalı ise nasıl doğrulanır (GitHub/GitLab/Branch policy seçin).",
+        "Pipeline sırasını tablo olarak verin; her satır: adım adı → çalışan komut (veya makefile hedefi) → başarısızlıkta bloklayıcı mı (evet/hayır).",
+        "`ruff`, `pytest`, veya kullandığınız eşdeğer araçların sürümü sabit gösterilmiş olsun (pin); neden sürekli yükseltme güvenilir olmayabilir için bir cümle.",
+        "`DATABASE_URL_TEMPLATE` vb. sırları GitHub/GitLab Secrets’ta saklama adımlarını yazın; yanlışlıkla `.env` commit edilirse ne yapılır (bir paragraf).",
+        "**Ajan / LLM bileşeni** için: küçük bir «altın soru kümesi» veya beklenen tool-kullanım senaryosu ile stage’te otomatik veya elle tetiklenebilir doğrulama adımının nereye eklendiğini ve başarı redline’ının ne olduğunu yazın.",
+        "Stage dağıtımı için ya «manuel onay butonlu» iş akışı adı ya da «tag push ile tetik» gibi seçiminizi ve seçim gerekçenizi yazın.",
+        "`main` CI kırmızı iken ilk 15 dk’lık playbook: kim bakar (on-call/on-dev), ilk log linki neresi, acil olarak PR nasıl revert edilir (komut yazın)."
+      ],
+      "meta": {
+        "difficulty": "beginner_intermediate",
+        "topic": "cicd",
+        "scenario_team_size": "5",
+        "trigger_incident": "bad_migration_deploy",
+        "ai_angle": "slack_triage_agent_pipeline"
+      }
+    },
+    {
+      "id": "CHT-real-backup-dr-tabletop",
+      "category": "real_world",
+      "name": "Bölgesel kesinti masa tatbikatı (PostgreSQL + nesne depolama)",
+      "description": "Varsayım: Eğitim içerikleri için «Akademi Player» diyelim; video posterleri S3 uyumlu depoda, kurs kayıtları ve ilerleme PostgreSQL’de. Bulut sağlayıcı tek bölgede «az çok çıkagelir» garantisi vermiş; CTO gece yarısı soruyor: «Depolama bölgeniz 6 saat yok oldu. Ne kaybedersiniz, ne kadarında ayağa kalkarsınız?» Masa tatbikatı çıktınız: bileşen listesi, RPO/RTO, geri yükleme sırası iletişim planı.",
+      "deadline_hours": 32,
+      "points": 78,
+      "checklist": [
+        "Gerçek marka gerekmiyor; seçtiğiniz ürünü tek paragraf tanıtan «iş kaybı özeti»: kesinti sırasında ne çalışmaz, günlük ciro/tepki varsayımınız yazılı olsun.",
+        "Bileşen envanteri: uygulama (çalışır durum için ne gerekli), Postgres, nesne deposu — her birinin «kritiklik» ve «geri yükleme süresine duyarlılık» sırasına göre listesi.",
+        "**Ajan bileşeni** varsa (örn. Slack veya dahili araç için RAG ile yanıtlı destek botu): vektör indeksi ve araç çıktısı önbelleğinin yeniden oluşturulması için kurtarma sırasına nerede sığdığınızı yazın.",
+        "RPO ve RTO rakamları: örneğin «RPO 15 dk», «RTO 4 saat» — her biri iş gerekçesiyle (video binlerce GB ise yedek bant genişliği notu dahil olabilir).",
+        "Geri yükleme runbook’u: önce Postgres mi nesne deposu mu sıra ve neden öyle; test veritabanında kuru deneme dahil en az üç net adım yazın.",
+        "İletişim: iç Slack kanalı sırası, müşteri duyurusunun hangi süre sonra yapılacağı, «bilinmeyen süre kesinti» metni taslağı (iki cümle).",
+        "«Tek bölge» risk özeti ile birlikte ileride alınabilecek üç ucuz iyileştirme (salt okuma kopyası, haftalık restore testi, çapraz region replikasyon fikir düzeyinde)."
+      ],
+      "meta": {
+        "difficulty": "intermediate",
+        "topic": "dr",
+        "scenario_assets": [
+          "postgres",
+          "object_storage"
+        ],
+        "ai_optional": "rag_support_bot_recovery"
+      }
+    },
+    {
+      "id": "CHT-real-api-keys-rotation-plan",
+      "category": "real_world",
+      "name": "B2B entegrasyon: API anahtarı rotasyonu + sızıntı sahnesi",
+      "description": "Varsayım: «Community CRM» üçüncü parti bir onboarding aracından lead alıyor; hem giden webhook imzalı istek hem inbound REST çağrıları için paylaşılan bir anahtar çiftiniz oldu. Pazarlama aracından gelen bildirime göre eski anahtarı kullanan yanlış yapılandırılmış üç müşteri var. Yeni uyumluluk kuralı: 90 günde bir rotasyon prosedürü ve sızıntıda «24 saat içinde bildirilmiş olay günlükleri» gereksinimini yazıya dökün. Not: dahili olarak **otomasyon ajanına** bağlı araçların da (`POST /leads/import` ile) ayrı kimlik doğrulama anahtarı döndürülebiliyorsa süreç aynı runbook’a nasıl sığdığını yazın.",
+      "deadline_hours": 36,
+      "points": 74,
+      "checklist": [
+        "Anahtar yaşam döngüsü zaman çizelgesi: oluştur → dağıt (çift yazma penceresi) → eskisini revoke — her aşamanın süre tahmini ile.",
+        "**İnsansız ajan kullanıcı hesabı veya araç JWT’si** ayrıştırılmış ise rotasyon sırasına entegre edildiğini ve hangi sırayla devre dışı bırakılacağını madde olarak yazın.",
+        "Müşteri ve dahili Slack/e-posta için «yakında anahtar değişiyor» metin taslağı (kibar, tarih ve geri uyum penceresi açık).",
+        "Sızıntı senaryosu: anahtarın GitHub gist’te yanlışlıkla yayınlandığını farz edin; 0–1 saat, 1–24 saat için farklı adımlar listesi yazın.",
+        "Audit günlük şeması: hangi JSON alanları zorunlu (örn. anahtar_id’yi mümkünse hash’lenmiş gösterimi), saklama süresi seçimi ve seçim gerekçesi.",
+        "En az iki onboarding belgesindeki sık hata («anahtarı .env olarak repoya yazmak»): nasıl yakalanır (pre-commit, secret scanning fikrinde).",
+        "GDPR gerektiren veri işlenmediğinde net beyan veya gerekiyorsa kısıtlı süre işleme notu yazın."
+      ],
+      "meta": {
+        "difficulty": "beginner_intermediate",
+        "topic": "secrets",
+        "scenario_integrations": [
+          "webhook_signed",
+          "inbound_rest"
+        ],
+        "ai_angle": "automation_agent_credentials"
+      }
+    },
+    {
+      "id": "CHT-real-cost-spot-vs-on-demand-note",
+      "category": "real_world",
+      "name": "Gece iş yükleri: Spot vs sürekli iş (maliyet + risk)",
+      "description": "Varsayım: Küçük startup her gece embeddings ve rapor oluşturmak için 4 saatlik batch çalıştırıyor; şimdiki üç `t3.medium` on-demand yaklaşık 120 $/ay. Finans «%30 indir» istiyor. Spot instance ile batch’ü taşımak istiyorsunuz ama ara sıra iptal yaşanırsanız SLA’nız günlük özete «ertesi sabah önce» teslim yazılmış. Karar özeti tek sayfa: seçtiğiniz SKU’lar (veya eşdeğer), iptal yaşantısı, ölçek tetikleri ve uyarı politikası yazılacak. Not: nightly gövde işi **embedding + özet çıkaran küçük ajan sürecidir** — token ve API kota riski tabloya dahil.",
+      "deadline_hours": 28,
+      "points": 68,
+      "checklist": [
+        "Şu anki ve teklif edilen yapıların «aylık tahmini özet maliyeti» tablosu; rakamları varsayılmış birim ile verin ve kısıt olarak «eğitime özel» etiketi koyun.",
+        "**Üçüncü parti LLM veya gömülü API** için tahmini kota ve fazla kullanım alarmı için eşik (saat başı veya günlük) ekleyin; nasıl sıfırlandığı veya bildirildiği bir cümle.",
+        "İş yüklü seçim: sürekli on-demand mikro ile spot büyük arasında trade-off’unuzu üç madde yazın (yeniden zamanlama, checkpoint, sıra).",
+        "Spot kesintisinde süre yeniden zamanlama stratejiniz tek paragraflık («iptal bildirildiğinden X dk sonra yeniden dene», maximum deneme vb.).",
+        "Ölçek veya SKU değişimini tetikleyen sayısal eşikler (CPU %, kuyruk derinliği, batch süresi hedefinden sapma yüzdesi).",
+        "Fatura uyarısı: eşik (örn. beklenenden %40 üzeri) ve bildirimin gideceği rol (finance@).",
+        "Kullanımı izlemek için hangi konsolda hangi üç etiketi (environment, workload, spot=true) takip edeceğinizi yazın."
+      ],
+      "meta": {
+        "difficulty": "beginner",
+        "topic": "finops_intro",
+        "scenario_workload": "nightly_ml_batch",
+        "ai_angle": "llm_quota_and_embeddings"
+      }
+    },
+    {
+      "id": "CHT-real-ai-support-multichannel-governance",
+      "category": "real_world",
+      "name": "Çok kanallı destek ajanı: politika + eskalasyon + ölçüm",
+      "description": "Varsayım: «Akademi Care» üç kanaldan yazı ile destekliyor — kamuya açık Slack topluluğu, e-posta ve web formu — ve hepsini **tek düzenleyici graf** üzerinde çalışan bir yanıtlama ajanı okuyup sınıflandırıyor (özel bilgi sızdırma ve çift yanıt riskleri var). Geçen hafta iki olay oluştu: (1) ajan müşteri puanına rağmen “çözüldü” etiketi önermiş, (2) başka kullanıcı adına özel bağlantılı bir ticket numarası sızırmış görünümü oluşmuş. Ürün, hukuk ve güvenilirlik bir «çerçeve belgesi» istiyor: hangi çıktılar otomatik, hangileri insan onayı zorunlu, hangi metrikleri haftalık raporlıyorsunuz.",
+      "deadline_hours": 38,
+      "points": 82,
+      "checklist": [
+        "**Tehdit modeli** kısmı yazın (prompt enjeksiyonu içerik yükleme olarak, araç yanlış env çağrısı olarak, hallucination olarak) ve her için bir «önlem + tespit + eskalasyon» satırı üretin.",
+        "İnsanın devreye girmesi gereken koşullar listesi — en az üç net tetik yazın (ör. PCI/ödeme, hesap iptali, taciz bildirimi, kişisel veri talebi tonu).",
+        "Kanala göre çıktı farkları: Slack’te ephemeral veya thread mi, web’te form sonrası e-postada ne kadar bağlam açılacak tek sayfalık özette.",
+        "Haftalık rapor taslağı: çözüm oranı doğruluğu, kullanıcı memnuniyeti geri bildirimi, LLM çıktısından kaynaklı manuel düzeltme yüzdesi gibi seçtiğiniz üç KPI ve bunları yorumlarken dikkat edilecek üç sınırlılık uyarısı.",
+        "**Red team / zararlı sahne için masa tatbikatı özeti**: yönetici gibi yazılmış mesaj ile ajanı API anahtarı söyletme deneyi — ilk 10 dakikalık yanıt ve öğrendikleriniz.",
+        "`meta` olarak tutabileceğiniz basit günlük alanları: channel_id, kullanıcı_id hash, model_sürüm, prompt_değişim_id, araç başarı-başarısız liste — hangi üç alanı zorunlu tuttuğunuzu ve nedeni yazın."
+      ],
+      "meta": {
+        "difficulty": "intermediate",
+        "topic": "ai_ops_governance",
+        "scenario": "multi_channel_support_agent"
+      }
+    },
+    {
+      "id": "CHT-real-ai-tool-using-agent-incident-response",
+      "category": "real_world",
+      "name": "Araç kullanan dahili ajan olayı: RCA + güvenilirlik yaması",
+      "description": "Varsayım: Ofis işleri için dahili kullanıcıya açık **birincil e-posta sıralayıcısı ajanınız** üç araca bağlı: CRM arama (`search_contacts`), not defteri oluşturma (`create_ticket`), tarih bloklama için takvim API’si. Pazar sabahı ajan doğru bağlamda bile **yanlış kişiyi** doğru müşteri kaydı olarak etiketlemiş (`create_ticket` parametre yanlışı) — 11 yanlış toplantı daveti çıkmış ve satış güvenini sarsmış. Yoklama sırasında ajan grafınızın günlüklerinde son 24 saat için **araç parametre doğruluğu** metriğinde uyarı olmadığı görülmüş.",
+      "deadline_hours": 36,
+      "points": 88,
+      "checklist": [
+        "Tek sayfa **RCA özeti**: beş olası kök nedeni (model, araç şeması, bağlam sıkıştırması, izleme boşluğu, deploy) hangi sırayla ve neden böyle sıraladığınızı — her biri bir cümle.",
+        "**Kısa süreli yama için runbook**: ajan grafiğini kilitleyen feature flag anahtarı, iptal edilen toplantı davetlerinin nasıl bildirileceği, doğrulayıcı için üç elle test senaryosu.",
+        "**Orta vadede izleme**: hangi araçların giriş alanları için parametre doğrulayıcı (validator) zorunlu olmalı ve neden — madde listesi.",
+        "**Kalıcı etki yaratan araç çıktıları** için politika yazın — `create_ticket` gibi adımlarda insan onayı gerektiren alanları ve bu liste güncellendiğinde sürüm notunun nasıl duyurulacağını yazın.",
+        "Model ve araç grafı sürümleri release notlarına hangi üç adımla eklenecek ve hangi kontroller tekrarını azaltır?",
+        "**Retrospektif aksiyon tablosu**: üç aksiyon, sahibi ve hedef bitiş tarihi."
+      ],
+      "meta": {
+        "difficulty": "advanced",
+        "topic": "ai_incident_rca",
+        "scenario": "tool_using_calendar_agent_failure"
+      }
+    },
+    {
+      "id": "CHT-real-ai-rag-hr-chatbot-compliance",
+      "category": "real_world",
+      "name": "İK politikaları için RAG sohbet robotu — kaynak doğruluğu ve güncelliği",
+      "description": "Varsayım: şirkette **500 kişilik** ekibe yönelik politikaları yanıtlayan dahili Slack’ta «PolicyPal» diyorsunuz: Confluence politikalarından RAG yapılmış. Güncellenmemiş **eski doğum izni maddesi** nedeniyle ajan yanlış gün sayısı veya ücretli izin gibi hatalı özet vermiş; bir çalışan ile yönetici arasında e-postaya kadar uzanan bir İK alarmı oluşmuş. Güvenilirlik politikası gereği bu tür çıktılar `source_attribution_required` olarak işlenecek.",
+      "deadline_hours": 34,
+      "points": 80,
+      "checklist": [
+        "**Belgeler yaşam döngüsü politikası yazın**: yeni politikada Confluence yayın tarihi Slack’te kaç güne bağlı bildirilir, eski içerik arama indeksi ne sıklıkla yenilenir.",
+        "**Yanıtta zorunlu format**: üç cümleye sığan doğal dil + doğrudan Confluence bağlantıları ve yayın tarihi blok şablon taslağı (markdown ok).",
+        "Kaynak eşleştirilemediğinde veya model güveni düştüğünde **yanıt bloklama**: «bu politika doğrulanamadı» gibi üç somut tetik ve kullanıcıya gösterilecek güvenli metin taslağı.",
+        "**Kritik yanlış riski için mini değerlendirme havuzu**: en az sekiz doğal dil sorusunun listesi; doğru cevabın nasıl doğrulanacağı (bir tablo).",
+        "**Manuel doğrulama sırası**: hangi üç rol (ör. İş hukuku/paralegal özeti yazabilen, İK ortağı, güvenilirlik şampiyonu) hangi sırayla müdahale eder?",
+        "**Log ve denetlenebilirlik**: hangi sorgu zaman damgasını, hangi belge kimliklerinin çekilmiş kaynağını günlükte tutmak zorunlu olur — JSON örnek yazın."
+      ],
+      "meta": {
+        "difficulty": "intermediate",
+        "topic": "rag_governance_compliance",
+        "scenario": "internal_hr_policy_rag_bot"
+      }
+    }
+  ]
+}

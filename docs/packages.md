@@ -212,6 +212,7 @@ challenge_type = ChallengeType(
     name="REST API Geliştirme",
     description="FastAPI ile CRUD endpoint'leri",
     deadline_hours=24,
+    points=52,
     checklist=["README mevcut", "Testler yazıldı", "Deploy edildi"],
     meta={"difficulty": "intermediate"},
 )
