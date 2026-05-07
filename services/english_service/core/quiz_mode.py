@@ -228,17 +228,34 @@ class QuizMode:
             return self.finish_quiz(session)
 
         question = questions[current_index]
+        try:
+            qtext = question["question"]
+            opts = question["options"]
+        except (KeyError, TypeError):
+            Metrics.inc("quiz_validation_failures")
+            _logger.warning("Malformed quiz_questions[%s]: %s", current_index, question)
+            return {
+                "type": "quiz_error",
+                "message": "Quiz data is invalid. Please start over with `/english`.",
+            }
+
+        if not isinstance(opts, list) or len(opts) != 3:
+            Metrics.inc("quiz_validation_failures")
+            return {
+                "type": "quiz_error",
+                "message": "Quiz options corrupted. Please start over with `/english`.",
+            }
 
         options_text = "\n".join(
             f"{idx + 1}. {option}"
-            for idx, option in enumerate(question["options"])
+            for idx, option in enumerate(opts)
         )
 
         return {
             "type": "quiz_question",
             "message": (
                 f"Question {current_index + 1}/{len(questions)}\n"
-                f"{question['question']}\n"
+                f"{qtext}\n"
                 f"{options_text}"
             ),
         }

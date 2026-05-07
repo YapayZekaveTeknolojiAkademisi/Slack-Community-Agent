@@ -6,6 +6,7 @@ from packages.database.models.challenge import ChallengeStatus
 from packages.database.repository.challenge import ChallengeRepository
 from ...logger import _logger
 from ..queue.channel_registry import ChannelRegistry
+from ...utils.notifications import notify_challenge_closed_admin
 from ...utils.slack_helpers import slack_helper
 
 
@@ -66,6 +67,14 @@ class DeadlineMonitor:
                 if now > end_time:
                     _logger.info("[DL] Expired: %s", challenge.id)
 
+                    ct = challenge.challenge_type
+                    cat_lab = (
+                        ct.category.value.replace("_", " ").title() if ct else None
+                    )
+                    tid = ct.id if ct else None
+                    tnm = ct.name if ct else None
+                    cid = str(challenge.id)
+
                     ch_cid = challenge.challenge_channel_id
                     if ch_cid:
                         await asyncio.to_thread(
@@ -79,6 +88,19 @@ class DeadlineMonitor:
                         )
                         await asyncio.to_thread(slack_helper.archive_channel, ch_cid)
                         self._registry.unregister_challenge(ch_cid)
+
+                        def _admin_deadline() -> None:
+                            notify_challenge_closed_admin(
+                                challenge_id=cid,
+                                reason="deadline",
+                                archived_channel_id=ch_cid,
+                                actor_slack_id=None,
+                                category_label=cat_lab,
+                                challenge_type_id=tid,
+                                challenge_type_name=tnm,
+                            )
+
+                        await asyncio.to_thread(_admin_deadline)
 
                     challenge.status = ChallengeStatus.NOT_COMPLETED
                     challenge.challenge_ended_at = now

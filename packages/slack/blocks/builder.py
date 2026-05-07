@@ -7,11 +7,11 @@ class BlockBuilder:
     """
 
     @staticmethod
-    def header(text: str) -> Dict[str, Any]:
+    def header(text: str, *, emoji: bool = True) -> Dict[str, Any]:
         """Başlık bloğu oluşturur (plain_text üst sınırı 150 karakter)."""
         return {
             "type": "header",
-            "text": {"type": "plain_text", "text": text, "emoji": True}
+            "text": {"type": "plain_text", "text": (text or "")[:150], "emoji": emoji},
         }
 
     @staticmethod
@@ -176,10 +176,9 @@ class MessageBuilder:
     def __init__(self):
         self._blocks: List[Dict] = []
 
-    def add_header(self, text: str) -> "MessageBuilder":
+    def add_header(self, text: str, *, emoji: bool = True) -> "MessageBuilder":
         # Slack header plain_text üst sınırı 150 karakter
-        t = (text or "")[:150]
-        self._blocks.append(BlockBuilder.header(t))
+        self._blocks.append(BlockBuilder.header((text or "")[:150], emoji=emoji))
         return self
 
     def add_text(self, text: str, fields: Optional[List[str]] = None) -> "MessageBuilder":

@@ -20,6 +20,7 @@ from ...core.event_loop import run_async
 from ...core.queue.channel_registry import ChannelRecord
 from ...core.queue.challenge_queue import QueueItem
 from ...manager import service_manager
+from ...utils.notifications import notify_challenge_community_launch_long, notify_challenge_launched_admin
 from ...utils.slack_helpers import slack_helper
 from ...utils.slack_user_sync import get_or_create
 from ...logger import _logger
@@ -347,6 +348,29 @@ def _launch_challenge(client, category: ChallengeCategory, participants: list[st
         text=f"🎉 {cat_label} Challenge Başladı! Ekip: {mentions}",
         blocks=builder.build(),
     )
+
+    if challenge_id != "unknown":
+        notify_challenge_launched_admin(
+            challenge_id=challenge_id,
+            challenge_channel_id=channel_id,
+            category_label=cat_label,
+            challenge_type_id=challenge_type.id if challenge_type else None,
+            challenge_type_name=challenge_type.name if challenge_type else None,
+            points=challenge_type.points if challenge_type else None,
+            participant_slack_ids=participants,
+        )
+
+    notify_challenge_community_launch_long(
+        challenge_id=challenge_id,
+        challenge_channel_id=channel_id,
+        category_label=cat_label,
+        challenge_type_name=challenge_type.name if challenge_type else None,
+        challenge_type_description=challenge_type.description if challenge_type else None,
+        deadline_hours=challenge_type.deadline_hours if challenge_type else None,
+        points=challenge_type.points if challenge_type else None,
+        participant_slack_ids=participants,
+    )
+
     _logger.info(
         "[EVT] Challenge launched: channel=%s category=%s type=%s participants=%s",
         channel_id, category.value,

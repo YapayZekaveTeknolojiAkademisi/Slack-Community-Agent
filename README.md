@@ -1,6 +1,6 @@
 # Slack Community Agent
 
-Slack topluluklarında **challenge tabanlı öğrenme süreçlerini** otomatize eden bot servisi. Takım oluşturma, proje atama, teslim alma ve jüri değerlendirmesinden oluşan tam yaşam döngüsünü yönetir.
+Slack topluluklarında **challenge tabanlı öğrenme süreçlerini** otomatize eden bot ailesi; aynı repoda etkinlik (`/event`), kanal özeti, özellik talebi ve diğer Socket tabanlı mikro-servisler bulunur.
 
 ---
 
@@ -11,6 +11,9 @@ Slack topluluklarında **challenge tabanlı öğrenme süreçlerini** otomatize 
 | 1 | [Migration Rehberi](docs/migration.md) | Veritabanı migration sistemi — kurulum, upgrade, downgrade, autogenerate |
 | 2 | [Challenge Servis Rehberi](docs/challenge-service.md) | Slash komutları, iş akışları, monitörler, konfigürasyon |
 | 3 | [Paket Kullanım Rehberi](docs/packages.md) | Logger, Database, Slack, SMTP ve Settings paketleri |
+| 4 | [Event Servis Rehberi](docs/event-service.md) | `/event` akışı, scheduler, onay güvenliği, arka plan loop ve Slack I/O |
+| 5 | [Summary Servis Rehberi](docs/summary-service.md) | `/channel-summary`, Groq özet akışı, chunker ve `[SUM]` admin logları |
+| 6 | [Feature Request Servis Rehberi](docs/feature-request-service.md) | `/cemilimyapar`, kotalar, benzerlik akışı ve admin rapor komutları |
 
 ---
 
@@ -27,11 +30,13 @@ Slack Community Agent
 │   └── challenge_type_seeds.py  challenge_types seeds (servis açılışında DB ile senkron)
 │
 ├── services/
-│   └── challenge_service/   Ana servis
-│       ├── handlers/        Slash komut ve event handler'ları
-│       ├── core/            Kuyruk, registry, monitörler
-│       └── config/          Değerlendirme kriterleri (criteria.json)
+│   ├── challenge_service/   Ana servis — kuyruk, challenge yaşam döngüsü, monitörler
+│   ├── event_service/       Etkinlik talepleri, onay/red, zamanlayıcı hatırlatmalar
+│   ├── summary_service/   /channel-summary — Groq ile kanal özeti
+│   ├── feature_request_service/  Özellik talepleri (/cemilimyapar vb.)
+│   └── english_service/     İngilizce pratik (ayrı Slack handler seti)
 │
+├── docs/                    Servis ve paket teknik rehberleri
 ├── seeds/                   challenge_types için JSON (dosya adı = kategori kökü; `id`: CHT-*; `points` elle)
 ├── migrations/              Alembic migration dosyaları
 ├── migrate.py               Migration CLI aracı
@@ -100,6 +105,8 @@ python -m services.challenge_service
 # Temiz başlatma — tüm challenge verisi sıfırlanır
 python -m services.challenge_service --fresh
 ```
+
+Diğer giriş noktaları: `python -m services.event_service` (`--socket` ile Socket), `python -m services.summary_service`, `python -m services.feature_request_service`, `python -m services.english_service`. Ayrıntılar için yukarıdaki `docs/` servis rehberleri.
 
 ---
 

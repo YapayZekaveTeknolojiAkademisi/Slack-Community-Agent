@@ -1,8 +1,8 @@
 # Event Service — build repository rootundan:
 #   docker build -f services/event_service/Dockerfile -t slack-community-agent:event .
 #
-# Varsayilan: Slack Socket Mode acik (tek basina calisir). Sadece scheduler icin:
-#   docker run ... slack-community-agent:event python -m services.event_service
+# Varsayılan CMD: Socket yok — compose ile uyumlu (challenge Socket tutar).
+# Tek başına Socket için: CMD override veya `--socket` ile çalıştırın.
 
 FROM python:3.12-slim-bookworm
 
@@ -33,6 +33,8 @@ RUN useradd --create-home --uid 1000 appuser && \
     chmod +x /usr/local/bin/entrypoint.sh
 
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
-CMD ["python", "-m", "services.event_service", "--socket"]
+# Varsayılan: Socket yok (docker-compose'taki gibi; challenge Socket tutar).
+# Tek başına koşarken: python -m services.event_service --socket
+CMD ["python", "-m", "services.event_service"]
 
 LABEL org.opencontainers.image.title="slack-community-agent-event"

@@ -31,17 +31,18 @@ def test_no_duplicate_options():
 )
 
     sample=[
- {
-   "question":"Choose the correct verb form.",
-   "options":["go","goes","going"],
-   "answer":"goes",
-   "explanation":"Use third person singular in present simple."
- }
-]
+        {
+            "question": "Choose the correct verb form.",
+            "options": ["go", "goes", "going"],
+            "answer": "goes",
+            "explanation": "Use third person singular in present simple.",
+            "target_type": "subject verb agreement",
+        }
+    ]
 
-    validated=quiz._basic_validate_questions(sample)
+    validated = quiz._basic_validate_questions(sample, level="beginner")
 
-    assert len(validated)==1
+    assert len(validated) == 1
 
 
 def test_duplicate_options_rejected():

@@ -1,8 +1,10 @@
 """
-Servis lifecycle bildirimleri — shutdown ve startup.
+Challenge servisi bildirimleri — admin vs topluluk ayrımı.
 
-Tüm fonksiyonlar sync'tir (slack_helper sync SDK kullanır).
-Hata olsa bile exception fırlatmaz — sadece loglar.
+Admin kanalı (`SLACK_ADMIN_CHANNEL`): emoji yok, kısa etiket + kısaltmalar (CHG önekli).
+Diğer kanallar (challenge özel kanal, ortak/komut kanalı vb.): emoji ve uzun metin kullanılabilir.
+
+Mesaj önekleri: `packages.slack.service_prefixes` üç harflik kod (CHG).
 
 Kanal türüne göre token seçimi:
   - Ortak/admin kanal  → bot_client  (mesajlar bot kimliğiyle gider)
@@ -11,13 +13,41 @@ Kanal türüne göre token seçimi:
 from __future__ import annotations
 
 from packages.settings import get_settings
+from packages.slack.blocks.builder import MessageBuilder
+from packages.slack.service_prefixes import PREFIX_CHALLENGE, fmt as svc_fmt
+
 from .slack_helpers import slack_helper
 from ..logger import _logger
+
+
+# --- Topluluk / genel günlük (emoji olabilir) -------------------------------------------------
+
+def _clog(msg: str) -> str:
+    return svc_fmt(PREFIX_CHALLENGE, msg)
+
+
+# --- Admin günlük: emoji yok, TAG| özet ----------------------------------------------
+
+
+def _admin_chg(tag: str, detail: str) -> str:
+    """
+    SLACK_ADMIN_CHANNEL için satır üretir. Emoji kullanılmaz; `tag` kısaltma (örn. YAP, SRB).
+    """
+    cleaned = " ".join((detail or "").split())
+    return f"[CHG] {tag}| {cleaned}"
+
+
+def _community_broadcast_channel() -> str:
+    """Uzantılı duyurular: SLACK_ANNOUNCEMENT_CHANNEL tanımlıysa o, değilse SLACK_CHALLENGE_CHANNEL."""
+    s = get_settings()
+    ann = (s.slack_announcement_channel or "").strip()
+    return ann or (s.slack_challenge_channel or "").strip()
 
 
 # ---------------------------------------------------------------------------
 # Shutdown bildirimleri
 # ---------------------------------------------------------------------------
+
 
 def notify_shutdown(
     registry,
@@ -26,14 +56,14 @@ def notify_shutdown(
     pending_challenges: dict,
 ) -> None:
     """
-    Servis kapanmadan önce tüm aktif kullanıcılara bildirim gönderir.
+    Servis kapanmadan önce ilgili kanallara kısa bilgi; özet admin kanalına (kısaltmalı).
     registry ve queue'lar henüz temizlenmeden önce çağrılmalı.
     """
     s = get_settings()
     challenge_channel = s.slack_challenge_channel
     admin_channel = s.slack_admin_channel
 
-    # 1. Aktif challenge kanalları — katılımcıları etiketle (özel kanal → user_client)
+    # 1. Aktif challenge kanalları — özel kanal → user_client (emoji kullanıcıya yönelik OK)
     for channel_id, record in registry.challenge_channels().items():
         if not record.members:
             continue
@@ -41,12 +71,11 @@ def notify_shutdown(
         _safe_private(
             channel_id,
             f"{mentions}\n\n"
-            "*Servis geçici olarak bakım moduna alınıyor.*\n\n"
-            "Challenge'ınız korunuyor — kaldığı yerden devam edebilirsiniz.\n"
-            "Komutlar kısa süre içinde yeniden aktif olacak.",
+            + _clog("Servis kapanıyor; challenge kaydı korunuyor.") + "\n"
+            + _clog("Komutlar kısa süre kullanılamayabilir; yeniden bağlanınca devam."),
         )
 
-    # 2. Evaluation kanalları — katılımcı + jüri etiketle (özel kanal → user_client)
+    # 2. Evaluation kanalları — user_client
     for channel_id, record in registry.evaluation_channels().items():
         all_members = list({*record.members, *record.jury})
         if not all_members:
@@ -55,11 +84,11 @@ def notify_shutdown(
         _safe_private(
             channel_id,
             f"{mentions}\n\n"
-            "*Servis geçici olarak bakım moduna alınıyor.*\n\n"
-            "Değerlendirme süreciniz korunuyor — kaldığı yerden devam edebilirsiniz.",
+            + _clog("Servis kapanıyor; değerlendirme kaydı korunuyor.") + "\n"
+            + _clog("Komutlar kısa süre kullanılamayabilir."),
         )
 
-    # 3. Kuyrukta bekleyenler → ortak kanalda etiketle (genel kanal → bot_client)
+    # 3. Kuyruk — ortak kanal (kısa)
     queued: list[tuple[str, str]] = []
     for cat, q in category_queues.items():
         cat_label = cat.value.replace("_", " ").title()
@@ -68,18 +97,18 @@ def notify_shutdown(
 
     if queued:
         mentions = " ".join(f"<@{uid}>" for uid, _ in queued)
-        lines = "\n".join(f"  • <@{uid}> — {cat}" for uid, cat in queued)
+        lines = "\n".join(f"  - <@{uid}> — {cat}" for uid, cat in queued)
         _safe_public(
             challenge_channel,
             f"{mentions}\n\n"
-            "Servis yeniden başlatılıyor. *Tüm kuyruklar sıfırlandı.*\n"
-            "Geri döndüğünde `/challenge join` ile yeniden katılabilirsin.\n\n"
+            + _clog("Yeniden başlatma: kuyruk sıfırlandı.") + "\n"
+            + _clog("Döndüğünüzde `/challenge join` ile tekrar kuyruğa girebilirsiniz.") + "\n\n"
             f"{lines}",
         )
 
-    # 4. In-memory pending challenge kullanıcıları → ortak kanalda etiketle (bot_client)
+    # 4. Pending gruplar — ortak kanal (kısa)
     with pending_lock:
-        for pid, p in list(pending_challenges.items()):
+        for _pid, p in list(pending_challenges.items()):
             if not p.get("participants"):
                 continue
             mentions = " ".join(f"<@{uid}>" for uid in p["participants"])
@@ -87,21 +116,20 @@ def notify_shutdown(
             _safe_public(
                 challenge_channel,
                 f"{mentions}\n\n"
-                f"*{cat_label}* kategorisindeki bekleme listeniz iptal edildi.\n"
-                "Geri döndüğünde `/challenge join` ile yeniden katılabilirsin.",
+                + _clog(f"Bekleyen {cat_label} grubu yeniden başlatma nedeniyle iptal.") + "\n"
+                + _clog("Tekrar `/challenge join` kullanabilirsiniz."),
             )
 
-    # 5. Admin kanalı — özet (bot_client)
+    # 5. Admin — kapanış (emoji yok)
     ch_count = len(registry.challenge_channels())
     ev_count = len(registry.evaluation_channels())
     q_count = sum(q.count() for q in category_queues.values())
-    _safe_public(
-        admin_channel,
-        f"🔴 *Challenge Service — Bakım Modu*\n\n"
-        f"• Aktif challenge kanalı: *{ch_count}*\n"
-        f"• Aktif değerlendirme kanalı: *{ev_count}*\n"
-        f"• Kuyrukta bekleyen: *{q_count}* kişi",
-    )
+    admin_lines = [
+        _admin_chg("EVT", "svc_dn shutdown_notify"),
+        _admin_chg("YAP", f"cnt_pch={ch_count} cnt_ech={ev_count} cnt_q={q_count}"),
+        _admin_chg("SRB", "sock_stop proc_exit"),
+    ]
+    _safe_public(admin_channel, "\n".join(admin_lines))
 
     _logger.info("[NOTIFY] shutdown notifications sent")
 
@@ -110,13 +138,13 @@ def notify_shutdown(
 # Startup: silinecek challenge'lar için bildirim
 # ---------------------------------------------------------------------------
 
+
 def notify_cancelled_challenges(
     cancel_data: list[tuple[str | None, list[str]]],
 ) -> None:
     """
     RESUME/FRESH temizliğinde silinecek challenge katılımcılarını bildirir.
     cancel_data: [(challenge_channel_id | None, [slack_id, ...])]
-    Kanalı varsa o kanala (özel → user_client), yoksa ortak kanala (bot_client) gönderir.
     """
     if not cancel_data:
         return
@@ -130,8 +158,8 @@ def notify_cancelled_challenges(
         mentions = " ".join(f"<@{uid}>" for uid in member_slack_ids)
         text = (
             f"{mentions}\n\n"
-            "Servis yeniden başlatıldığından bu challenge iptal edildi.\n"
-            "Yeniden katılmak için `/challenge join` komutunu kullanabilirsin."
+            + _clog("Bu challenge servis yeniden başlatması nedeniyle iptal edildi.") + "\n"
+            + _clog("Yeniden katılmak için `/challenge join` kullanın.")
         )
         if channel_id:
             _safe_private(channel_id, text)
@@ -145,16 +173,17 @@ def notify_cancelled_challenges(
 # Startup bildirimleri
 # ---------------------------------------------------------------------------
 
+
 def notify_startup(registry) -> None:
     """
-    Servis başladıktan ve registry dolduktan sonra çağrılır.
-    Aktif kanalları ve ortak kanalı bildirir.
+    Servis başladıktan ve registry dolduktan sonra.
+    Topluluk kanalına kısa özet; admin kanalına operasyon günlüğü (kısaltmalı).
     """
     s = get_settings()
     challenge_channel = s.slack_challenge_channel
     admin_channel = s.slack_admin_channel
 
-    # 1. Aktif challenge kanalları (özel kanal → user_client)
+    # 1. Aktif challenge kanalları (özel)
     for channel_id, record in registry.challenge_channels().items():
         if not record.members:
             continue
@@ -162,11 +191,10 @@ def notify_startup(registry) -> None:
         _safe_private(
             channel_id,
             f"{mentions}\n\n"
-            "*Servis yeniden devreye girdi.*\n\n"
-            "Challenge'ınız korunuyor — kaldığı yerden devam edebilirsiniz.",
+            + _clog("Servis tekrar çevrimiçi; challenge devam edebilir."),
         )
 
-    # 2. Evaluation kanalları (özel kanal → user_client)
+    # 2. Evaluation kanalları (özel)
     for channel_id, record in registry.evaluation_channels().items():
         all_members = list({*record.members, *record.jury})
         if not all_members:
@@ -175,72 +203,257 @@ def notify_startup(registry) -> None:
         _safe_private(
             channel_id,
             f"{mentions}\n\n"
-            "*Servis yeniden devreye girdi.*\n\n"
-            "Değerlendirme süreci kaldığı yerden devam ediyor.",
+            + _clog("Servis tekrar çevrimiçi; değerlendirme süreci devam eder."),
         )
 
-    # 3. Ortak challenge kanalı — genel duyuru (bot_client)
+    # 3. Topluluk challenge kanalı — kısa
     ch_count = len(registry.challenge_channels())
     ev_count = len(registry.evaluation_channels())
 
-    status_lines = []
-    if ch_count:
-        status_lines.append(f"• *{ch_count}* aktif challenge devam ediyor")
-    if ev_count:
-        status_lines.append(f"• *{ev_count}* değerlendirme süreci devam ediyor")
-    if not ch_count and not ev_count:
-        status_lines.append("• Aktif challenge veya değerlendirme yok — yenisine başlamak için hazır!")
+    if ch_count or ev_count:
+        status_line = _clog(
+            f"Durum: aktif challenge={ch_count}, değerlendirme={ev_count}."
+        )
+    else:
+        status_line = _clog("Durum: aktif challenge veya değerlendirme yok.")
 
-    status_block = "\n".join(status_lines)
-
-    _safe_public(
-        challenge_channel,
-        f"✅ *Challenge System aktif!*\n\n"
-        f"Bu platform, topluluk üyelerinin birlikte gerçek projeler geliştirerek "
-        f"hem teknik becerilerini pekiştirmelerini hem de birbirlerini tanımalarını sağlar.\n\n"
-        f"*Nasıl işler?*\n"
-        f"Kuyruğa katılırsın → eşleşen ekiple özel bir kanal açılır → belirlenen projeyi birlikte geliştirirsin → "
-        f"teslim edersin → jüri değerlendirir → puan ve geri bildirim alırsın.\n\n"
-        f"*Kategoriler:*\n"
-        f"• 📚 *Learn* — Kavramları keşfetmek ve öğrenmek isteyenler için\n"
-        f"• 🛠️ *Practice* — Eldeki becerileri gerçek görevlerle pekiştirmek için\n"
-        f"• 🌍 *Real World* — Sektörden alınmış gerçek senaryolar\n"
-        f"• 🚀 *No-Code / Low-Code* — Kod yazmadan çözüm üretenler için\n\n"
-        f"*Kazanımlar:*\n"
-        f"→ Ekip çalışması deneyimi\n"
-        f"→ Portfolio'na eklenebilir GitHub projeleri\n"
-        f"→ Jüri geri bildirimiyle nesnel değerlendirme\n"
-        f"→ Topluluk içinde tanınma ve networking\n\n"
-        f"*Durum:*\n"
-        f"{status_block}\n\n"
-        f"*Komutlar:*\n"
-        f"• `/challenge join` — Kuyruğa katıl\n"
-        f"• `/challenge start <n>` — n kişilik challenge başlat\n"
-        f"• `/challenge leave` — Kuyruktan çık\n"
-        f"• `/challenge list` — Kuyruk durumunu gör\n"
-        f"• `/challenge info` — Challenge geçmişin\n"
-        f"• `/challenge help` — Tüm komutlar\n\n"
-        f"• `/jury join` — Jüri kuyruğuna katıl\n"
-        f"• `/jury leave` — Jüri kuyruğundan çık",
+    community_text = "\n".join(
+        [
+            _clog("Sistem aktif."),
+            status_line,
+            _clog("Komutlar: `/challenge join` · `/challenge start` · `/challenge list` · `/challenge help` · `/jury join`"),
+        ]
     )
+    _safe_public(challenge_channel, community_text)
 
-    # 4. Admin kanalı (bot_client)
-    _safe_public(
-        admin_channel,
-        f"🟢 *Challenge Service — Aktif*\n\n"
-        f"• Aktif challenge kanalı: *{ch_count}*\n"
-        f"• Aktif değerlendirme kanalı: *{ev_count}*",
+    # 4. Admin — açılış (emoji yok)
+    admin_text = "\n".join(
+        [
+            _admin_chg("EVT", "svc_up reg_ok"),
+            _admin_chg("YAP", f"cnt_pch={ch_count} cnt_ech={ev_count}"),
+            _admin_chg("SRB", "sock_listen mon_run"),
+        ]
     )
+    _safe_public(admin_channel, admin_text)
 
     _logger.info("[NOTIFY] startup notifications sent")
+
+
+# ---------------------------------------------------------------------------
+# Challenge başladı — admin günlük + toplulukta uzun duyuru
+# ---------------------------------------------------------------------------
+
+
+def notify_challenge_launched_admin(
+    *,
+    challenge_id: str,
+    challenge_channel_id: str,
+    category_label: str,
+    challenge_type_id: str | None,
+    challenge_type_name: str | None,
+    points: int | None,
+    participant_slack_ids: list[str],
+) -> None:
+    """Yeni challenge açıldığında admin kanalına günlük (emoji yok)."""
+    s = get_settings()
+    admin_channel = (s.slack_admin_channel or "").strip()
+    if not admin_channel:
+        return
+
+    tid = challenge_type_id or "-"
+    tname = challenge_type_name or "-"
+    pts = str(points) if points is not None else "-"
+    people = " ".join(f"<@{uid}>" for uid in participant_slack_ids) or "-"
+
+    lines = [
+        _admin_chg("EVT", f"launch_beg cid={challenge_id}"),
+        _admin_chg("YAP", f"priv_ch pch={challenge_channel_id} cat={category_label}"),
+        _admin_chg("YAP", f"db_ins tid={tid} tnm={tname} pts={pts}"),
+        _admin_chg("YAP", "reg_up"),
+        _admin_chg("SRB", "team_dev cmd_submit=/challenge_submit ttl=10m"),
+        _admin_chg("KT", people),
+    ]
+    _safe_public(admin_channel, "\n".join(lines))
+
+
+def notify_challenge_community_launch_long(
+    *,
+    challenge_id: str,
+    challenge_channel_id: str,
+    category_label: str,
+    challenge_type_name: str | None,
+    challenge_type_description: str | None,
+    deadline_hours: int | None,
+    points: int | None,
+    participant_slack_ids: list[str],
+) -> None:
+    """
+    Yeni challenge için topluluk/duyuru kanalında uzun açıklama (emoji kullanılabilir).
+    Kanal: SLACK_ANNOUNCEMENT_CHANNEL varsa orası, yoksa SLACK_CHALLENGE_CHANNEL.
+    """
+    ch_out = _community_broadcast_channel()
+    if not ch_out:
+        return
+
+    mentions = " ".join(f"<@{uid}>" for uid in participant_slack_ids) or "—"
+    pname = challenge_type_name or "Henüz atanmamış şablon"
+
+    desc = (challenge_type_description or "").strip()
+    if len(desc) > 2200:
+        desc = desc[:2199] + "…"
+
+    hrs = deadline_hours if deadline_hours is not None else "—"
+    pts = points if points is not None else "—"
+
+    intro = (
+        "Yeni bir challenge başladı. Aşağıdaki ekip, özel bir çalışma kanalında birlikte "
+        "projeyi yürütüyor. Topluluktaki herkesin haberdar olması için bu mesaj özetliyor:"
+    )
+
+    builder = MessageBuilder()
+    builder.add_header(f"{category_label} challenge başladı", emoji=True)
+    builder.add_text(intro)
+    builder.add_divider()
+    builder.add_text(
+        f"*Ekip*\n{mentions}\n\n"
+        f"*Kategori*\n_{category_label}_\n\n"
+        f"*Atanan proje (şablon)*\n*{pname}*\n\n"
+        + (f"*Proje özeti*\n{desc}\n\n" if desc else "")
+        + f"*Süre (şablon)*\n_{hrs}_ saat (deadline izleme aktif).\n\n"
+        f"*Şablon puanı*\n_{pts}_ (tamamlayıp jüride değerlendiklerinde kullanılacak şablon ağırlığı).\n\n"
+        "*Nasıl ilerliyor*\n"
+        "• Takım kendi kapalı Slack kanalında çalışıyor; size görünmez, bu normal.\n"
+        "• Görev teslim etmek için ekip içinde `/challenge submit` kullanılacak (10 dk’lık teslim penceresi).\n"
+        "• Kendi geçmişiniz için `/challenge info` yazabilirsiniz.\n"
+        "• Yeni challenge’a katılmak için `#challenge` (veya komutların tanımlandığı kanalda) `/challenge join`."
+    )
+    builder.add_context(
+        [f"[CHG] ref_cid `{challenge_id}` · pch `{challenge_channel_id}` (özel kanal)"]
+    )
+
+    fallback = f"[CHG] Challenge başladı: {category_label} — {pname}. Ekip: {mentions}"
+
+    try:
+        slack_helper.post_public_message(channel_id=ch_out, text=fallback, blocks=builder.build())
+    except Exception as exc:
+        _logger.warning("[NOTIFY] community launch long failed (%s): %s", ch_out, exc)
+
+
+# ---------------------------------------------------------------------------
+# Teslim sonrası (eval kanalı açılışı) — admin
+# ---------------------------------------------------------------------------
+
+
+def notify_challenge_submitted_admin(
+    *,
+    challenge_id: str,
+    archived_challenge_channel_id: str,
+    eval_channel_id: str,
+    submitted_by_slack_id: str,
+    category_label: str,
+    challenge_type_id: str | None,
+    challenge_type_name: str | None,
+    points: int | None,
+    github_url_trim: str,
+) -> None:
+    s = get_settings()
+    admin_ch = (s.slack_admin_channel or "").strip()
+    if not admin_ch:
+        return
+
+    tid = challenge_type_id or "-"
+    tnm = challenge_type_name or "-"
+    pts = str(points) if points is not None else "-"
+    gh = (github_url_trim or "-")[:160]
+
+    lines = [
+        _admin_chg("EVT", f"submit_ok cid={challenge_id}"),
+        _admin_chg("YAP", f"pch_arch pch={archived_challenge_channel_id}"),
+        _admin_chg("YAP", f"ech_open ech={eval_channel_id}"),
+        _admin_chg("YAP", f"sub_by uid={submitted_by_slack_id} url={gh}"),
+        _admin_chg("INF", f"cat={category_label} tid={tid} tnm={tnm} tpl_pts={pts}"),
+        _admin_chg("SRB", "jury_assign cmd_eval=/challenge_evaluate"),
+    ]
+    _safe_public(admin_ch, "\n".join(lines))
+
+
+# ---------------------------------------------------------------------------
+# Kapatılma — teslim edilmemiş veya iptal — admin
+# ---------------------------------------------------------------------------
+
+
+def notify_challenge_closed_admin(
+    *,
+    challenge_id: str,
+    reason: str,
+    archived_channel_id: str | None,
+    actor_slack_id: str | None,
+    category_label: str | None,
+    challenge_type_id: str | None,
+    challenge_type_name: str | None,
+) -> None:
+    """reason: surrender | deadline | (ileride başka kodlar)."""
+    s = get_settings()
+    admin_ch = (s.slack_admin_channel or "").strip()
+    if not admin_ch:
+        return
+
+    ach = archived_channel_id or "-"
+    act = actor_slack_id or "-"
+    cat = category_label or "-"
+    tid = challenge_type_id or "-"
+    tnm = challenge_type_name or "-"
+
+    lines = [
+        _admin_chg("EVT", f"ch_end cid={challenge_id} rsn={reason}"),
+        _admin_chg("YAP", f"pch_arch pch={ach}"),
+        _admin_chg("INF", f"cat={cat} tid={tid} tnm={tnm} actor={act}"),
+        _admin_chg("SRB", "noop db_st=NOT_COMPLETED"),
+    ]
+    _safe_public(admin_ch, "\n".join(lines))
+
+
+# ---------------------------------------------------------------------------
+# Değerlendirme tamamlandı — admin
+# ---------------------------------------------------------------------------
+
+
+def notify_challenge_eval_completed_admin(
+    *,
+    challenge_id: str,
+    evaluation_channel_id: str | None,
+    average_score: float,
+    challenge_type_id: str | None,
+    challenge_type_name: str | None,
+) -> None:
+    s = get_settings()
+    admin_ch = (s.slack_admin_channel or "").strip()
+    if not admin_ch:
+        return
+
+    ech = evaluation_channel_id or "-"
+    tid = challenge_type_id or "-"
+    tnm = challenge_type_name or "-"
+    score_s = f"{average_score:.2f}"
+
+    lines = [
+        _admin_chg("EVT", f"eval_done cid={challenge_id}"),
+        _admin_chg("YAP", f"jury_full scr={score_s}"),
+        _admin_chg("YAP", f"ech_arch ech={ech}"),
+        _admin_chg("INF", f"tid={tid} tnm={tnm}"),
+        _admin_chg("SRB", "db_st=EVALUATED pub_ann_ok"),
+    ]
+    _safe_public(admin_ch, "\n".join(lines))
 
 
 # ---------------------------------------------------------------------------
 # Yardımcılar
 # ---------------------------------------------------------------------------
 
+
 def _safe_public(channel_id: str, text: str) -> None:
-    """Ortak/admin kanallar için bot token'ıyla gönderir, hata fırlatmaz."""
+    if not (channel_id or "").strip():
+        return
     try:
         slack_helper.post_public_message(channel_id, text)
     except Exception as exc:
@@ -248,7 +461,8 @@ def _safe_public(channel_id: str, text: str) -> None:
 
 
 def _safe_private(channel_id: str, text: str) -> None:
-    """Özel kanallar için user token'ıyla gönderir, hata fırlatmaz."""
+    if not (channel_id or "").strip():
+        return
     try:
         slack_helper.post_message(channel_id, text)
     except Exception as exc:

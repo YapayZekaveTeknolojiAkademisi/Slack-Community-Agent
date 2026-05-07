@@ -90,11 +90,25 @@ def handle_challenge_command(ack: Ack, body: dict, client, command):
                 text="🧐 Herhangi bir kuyrukta veya bekleme listesinde değilsiniz."
             )
         elif not can_leave:
+            if "değerlendirme aşamasında" in engaged_reason:
+                leave_text = (
+                    f"⚠️ {engaged_reason}. Bu süreç bitene kadar yeni bir challenge'a katılamazsınız; "
+                    "`/challenge leave` yalnızca kuyruk ve bekleme listesi içindir."
+                )
+            elif "jüri üyesisiniz" in engaged_reason:
+                leave_text = (
+                    f"⚠️ {engaged_reason}. Göreviniz tamamlanana kadar yeni challenge kuyruğuna giremezsiniz; "
+                    "`/challenge leave` burada geçerli değil."
+                )
+            else:
+                leave_text = (
+                    f"⚠️ {engaged_reason} olduğunuz için kuyruktan çıkamazsınız.\n"
+                    "Projeyi bırakmak istiyorsanız challenge kanalınızdaki *Projeyi Bırak* butonunu kullanın."
+                )
             client.chat_postEphemeral(
                 channel=settings.slack_challenge_channel,
                 user=user_id,
-                text=f"⚠️ {engaged_reason} olduğunuz için kuyruktan çıkamazsınız.\n"
-                     "Projeyi bırakmak istiyorsanız challenge kanalınızdaki *Projeyi Bırak* butonunu kullanın."
+                text=leave_text,
             )
         else:
             handle_leave(client, user_id, settings.slack_challenge_channel)

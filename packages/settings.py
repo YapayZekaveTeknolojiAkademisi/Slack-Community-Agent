@@ -97,6 +97,63 @@ class SystemSettings(BaseSettings):
         description="Groq chat modeli (bos birakilirsa servis varsayilanlari)",
     )
 
+    summary_max_threads_per_channel: int = Field(
+        35,
+        ge=0,
+        validation_alias=AliasChoices(
+            "SUMMARY_MAX_THREADS_PER_CHANNEL",
+            "summary_max_threads_per_channel",
+        ),
+        description="/channel-summary: kanal başına thread yanıtları çekilecek üst mesaj üst sınırı (0=kapalı)",
+    )
+    summary_max_replies_per_thread: int = Field(
+        45,
+        ge=1,
+        le=300,
+        validation_alias=AliasChoices(
+            "SUMMARY_MAX_REPLIES_PER_THREAD",
+            "summary_max_replies_per_thread",
+        ),
+        description="/channel-summary: bir thread içinde zaman penceresine düşen en fazla yanıt satırı",
+    )
+    summary_max_threads_all: int = Field(
+        12,
+        ge=0,
+        validation_alias=AliasChoices(
+            "SUMMARY_MAX_THREADS_ALL",
+            "summary_max_threads_all",
+        ),
+        description="/channel-summary all: kanal başına thread üst sınırı (daha sıkı)",
+    )
+    summary_max_replies_per_thread_all: int = Field(
+        18,
+        ge=1,
+        le=300,
+        validation_alias=AliasChoices(
+            "SUMMARY_MAX_REPLIES_PER_THREAD_ALL",
+            "summary_max_replies_per_thread_all",
+        ),
+        description="/channel-summary all: thread başına yanıt üst sınırı",
+    )
+    summary_min_words_per_message: int = Field(
+        2,
+        ge=0,
+        le=500,
+        validation_alias=AliasChoices(
+            "SUMMARY_MIN_WORDS_PER_MESSAGE",
+            "summary_min_words_per_message",
+        ),
+        description="/channel-summary: boşluğa göre kelime sayısı; bu eşiğin altı LLM özeline gönderilmez (0=kapalı)",
+    )
+    summary_attribution_label: str = Field(
+        "Özet asistanı",
+        validation_alias=AliasChoices(
+            "SUMMARY_ATTRIBUTION_LABEL",
+            "summary_attribution_label",
+        ),
+        description="/channel-summary son satırında oluşturan adı (bot / ürün adı)",
+    )
+
     # Gemini API
     gemini_api_key: Optional[str] = Field(None, description="Gemini API anahtarı")
 
@@ -133,6 +190,15 @@ class SystemSettings(BaseSettings):
         description="Etkinlik komut kanalı (C...)",
     )
     event_reminder_enabled: bool = Field(True, description="Hatirlatma sistemi acik/kapali")
+    event_max_pending_per_user: int = Field(
+        0,
+        ge=0,
+        validation_alias=AliasChoices(
+            "EVENT_MAX_PENDING_PER_USER",
+            "event_max_pending_per_user",
+        ),
+        description="Kullanici basina es zamanli bekleyen (pending) talep ust siniri; 0=sinirsiz",
+    )
     event_approval_timeout_hours: int = Field(72, ge=1, description="Admin onay suresi (saat)")
     event_timezone: str = Field("Europe/Istanbul", description="Etkinlik saatlerinin yorumlanacagi IANA timezone (zoneinfo)")
     event_morning_reminder_hour: int = Field(8, ge=0, le=23, description="Gun basi hatirlatma saati (yerel TZ)")

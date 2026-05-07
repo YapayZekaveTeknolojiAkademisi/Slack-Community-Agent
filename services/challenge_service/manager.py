@@ -25,6 +25,7 @@ from .core.queue.challenge_queue import CustomQueue
 from .core.monitor.challenge_monitor import ChallengeMonitor
 from .core.monitor.deadline_monitor import DeadlineMonitor
 from .core.monitor.evaluation_monitor import EvaluationMonitor
+from .core.engagement import engaged_from_registry_channel_views
 from .utils.slack_helpers import slack_helper
 
 
@@ -263,8 +264,13 @@ class ChallengeServiceManager:
 
     def is_user_engaged(self, user_id: str) -> tuple[bool, str]:
         """
-        Kullanıcı herhangi bir kuyrukta, pending challenge'da veya
-        aktif challenge/evaluation kanalında mı kontrol eder.
+        Kullanıcı herhangi bir kuyrukta, pending challenge'da veya registry'de
+        aktif challenge veya değerlendirme kaydında mı kontrol eder.
+
+        Teslim sonrası takım challenge registry'de olmadığından, aynı kullanıcıların
+        ``evaluation_channels`` içindeki ``members`` listesinde görünmesi gerekir
+        (jüri atanana kadar dahil); böylece paralel yeni challenge'a girmeleri engellenir.
+
         Returns: (True/False, açıklama)
         """
         for cat, q in self.category_queues.items():
@@ -275,14 +281,13 @@ class ChallengeServiceManager:
                 if user_id in p["participants"]:
                     cat_label = p["category"].value.replace("_", " ").title()
                     return True, f"*{cat_label}* challenge bekleme listesinde (`{pid}`)"
-        for record in self.registry.challenge_channels().values():
-            if user_id in record.members:
-                return True, "aktif bir challenge'dasınız"
-        for record in self.registry.evaluation_channels().values():
-            if user_id in record.members:
-                return True, "challenge'ınız değerlendirme aşamasında"
-            if user_id in record.jury:
-                return True, "aktif bir değerlendirmede jüri üyesisiniz"
+        engaged, reason = engaged_from_registry_channel_views(
+            user_id,
+            challenge_channels=self.registry.challenge_channels(),
+            evaluation_channels=self.registry.evaluation_channels(),
+        )
+        if engaged:
+            return True, reason
         return False, ""
 
     def re_enqueue(self, items: list, category: "ChallengeCategory") -> None:

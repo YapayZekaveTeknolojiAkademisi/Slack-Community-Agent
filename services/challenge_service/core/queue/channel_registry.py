@@ -101,6 +101,13 @@ class ChannelRegistry:
                     return rec.copy()
             return None
 
+    def get_evaluation_by_challenge_id(self, challenge_id: str) -> ChannelRecord | None:
+        with self._lock:
+            for rec in self._evaluation.values():
+                if rec.challenge_id == challenge_id:
+                    return rec.copy()
+            return None
+
     def challenge_channels(self) -> Mapping[str, ChannelRecord]:
         with self._lock:
             return {k: v.copy() for k, v in self._challenge.items()}
@@ -135,6 +142,17 @@ class ChannelRegistry:
         with self._lock:
             return {k: v.copy() for k, v in self._evaluation.items()}
 
+    def set_evaluation_jury(self, channel_id: str, jury: list[str]) -> bool:
+        """Mevcut değerlendirme kaydının jüri listesini günceller (teslim sonrası jüri atanırken)."""
+        with self._lock:
+            r = self._evaluation.get(channel_id)
+            if not r:
+                _logger.warning("set_evaluation_jury: evaluation yok channel_id=%s", channel_id)
+                return False
+            self._evaluation[channel_id] = replace(r, jury=list(jury))
+            _logger.debug("channel_registry evaluation jury güncellendi %s", channel_id)
+            return True
+
     # --- genel ---------------------------------------------------------------
 
     def has_any(self, channel_id: str) -> bool:
@@ -146,57 +164,6 @@ class ChannelRegistry:
             self._challenge.clear()
             self._evaluation.clear()
 
-    def transition_challenge_to_evaluation(
-        self,
-        challenge_id: str,
-        evaluation_channel_id: str,
-        *,
-        jury: list[str] | None = None,
-    ) -> ChannelRecord | None:
-        """
-        Challenge → evaluation: `challenge_id` ile challenge kaydını bulur, challenge
-        haritasından siler, aynı üyeler + jüri ile evaluation kaydı ekler (tek atomik işlem).
-
-        ``evaluation_channel_id`` genelde değerlendirme kanalı oluşturulduktan sonra gelir.
-        ``jury`` verilmezse önceki kayıttaki ``jury`` listesi korunur (çoğunlukla boştuysa
-        çağıranın ``jury=[...]`` geçmesi beklenir).
-        """
-        if not evaluation_channel_id:
-            raise ValueError("evaluation_channel_id gerekli")
-
-        with self._lock:
-            old_key: str | None = None
-            old: ChannelRecord | None = None
-            for cid, rec in self._challenge.items():
-                if rec.challenge_id == challenge_id:
-                    old_key, old = cid, rec
-                    break
-            if old is None or old_key is None:
-                _logger.warning(
-                    "transition_challenge_to_evaluation: challenge_id=%s bulunamadı",
-                    challenge_id,
-                )
-                return None
-
-            del self._challenge[old_key]
-
-            jury_list = list(jury) if jury is not None else list(old.jury)
-            new_rec = ChannelRecord(
-                channel_id=evaluation_channel_id,
-                challenge_id=challenge_id,
-                members=list(old.members),
-                jury=jury_list,
-                admin_slack_id=old.admin_slack_id,
-            )
-            self._evaluation[evaluation_channel_id] = new_rec.copy()
-            _logger.info(
-                "channel_registry challenge→evaluation %s challenge_chan=%s eval_chan=%s",
-                challenge_id,
-                old_key,
-                evaluation_channel_id,
-            )
-            return new_rec.copy()
-
 
 async def _on_startup(
     registry: ChannelRegistry,
@@ -206,7 +173,8 @@ async def _on_startup(
     """
     Uygulama açılışında DB'den kanal kayıtlarını yükler.
 
-    - STARTED, COMPLETED → ``challenge_channel_id`` (challenge registry)
+    - STARTED → ``challenge_channel_id`` (challenge registry; yalnızca aktif takım kanalı)
+    - COMPLETED + ``evaluation_channel_id`` → evaluation registry (jüri beklerken pch arşivlenmiş olabilir)
     - IN_EVALUATION, EVALUATION_DELAYED → ``evaluation_channel_id`` (evaluation registry)
     """
     from packages.database.repository.challenge import ChallengeRepository
@@ -219,13 +187,27 @@ async def _on_startup(
 
     registry.clear()
 
-    for ch in started + completed:
+    for ch in started:
         cid = ch.challenge_channel_id
         if not cid:
             continue
         registry.register_challenge(
             ChannelRecord(
                 channel_id=cid,
+                challenge_id=ch.id,
+                members=_slack_ids_from_team(ch),
+                jury=_slack_ids_from_jury(ch),
+                admin_slack_id=admin_slack_id,
+            )
+        )
+
+    for ch in completed:
+        eid = ch.evaluation_channel_id
+        if not eid:
+            continue
+        registry.register_evaluation(
+            ChannelRecord(
+                channel_id=eid,
                 challenge_id=ch.id,
                 members=_slack_ids_from_team(ch),
                 jury=_slack_ids_from_jury(ch),

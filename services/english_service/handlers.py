@@ -50,11 +50,18 @@ def _post_user_reply(
 
 
 def handle_service_error(response, client, channel_id: str, user_id: str):
-    if "error" not in response:
-        return False
-
-    _post_user_reply(client, channel_id, user_id, response["error"])
-    return True
+    if response.get("error"):
+        _post_user_reply(client, channel_id, user_id, str(response.get("error")))
+        return True
+    if response.get("type") == "quiz_error":
+        _post_user_reply(
+            client,
+            channel_id,
+            user_id,
+            response.get("message", "Quiz error. Please start over with `/english`."),
+        )
+        return True
+    return False
 
 
 def setup_english_handlers():
@@ -109,7 +116,9 @@ def setup_english_handlers():
 
     @app.message(re.compile(".*"))
     def handle_writing_submission(message, client):
-        if message.get("subtype") == "bot_message":
+        # Yalnızca düz kullanıcı mesajları yazı teslimidir; bot / düzenleme / ek dosya vb.
+        # tetiklemelerinde LLM veya ephemeral gönderilmez (Slack yanlış event tekrarı riski azalır).
+        if message.get("subtype"):
             return
 
         if "user" not in message:
@@ -138,12 +147,28 @@ def setup_english_handlers():
             len(text),
         )
 
-        response = english_service.submit_writing(user_id, text)
-        if "error" in response:
-            _post_user_reply(client, channel_id, user_id, response["error"])
+        try:
+            response = english_service.submit_writing(user_id, text)
+        except Exception as exc:
+            _logger.error("English submit_writing failed user=%s: %s", user_id, exc, exc_info=True)
+            _post_user_reply(
+                client,
+                channel_id,
+                user_id,
+                "Evaluation failed unexpectedly. Please try again or restart with `/english`.",
+            )
             return
 
-        _post_user_reply(client, channel_id, user_id, response["message"])
+        if "error" in response:
+            _post_user_reply(client, channel_id, user_id, str(response.get("error")))
+            return
+
+        _post_user_reply(
+            client,
+            channel_id,
+            user_id,
+            response.get("message", "No feedback returned. Try again."),
+        )
 
     @app.action(re.compile("^english_select_level_"))
     def handle_level_selection(ack, body, client):
@@ -161,7 +186,7 @@ def setup_english_handlers():
             client,
             channel_id,
             user_id,
-            text=response["message"],
+            text=response.get("message", ""),
             blocks=[
                 {
                     "type": "section",
@@ -202,12 +227,13 @@ def setup_english_handlers():
         if handle_service_error(response, client, channel_id, user_id):
             return
 
-        if response["type"] == "writing_type_selection":
+        rtype = response.get("type")
+        if rtype == "writing_type_selection":
             _post_user_reply(
                 client,
                 channel_id,
                 user_id,
-                text=response["message"],
+                text=response.get("message", ""),
                 blocks=[
                     {
                         "type": "section",
@@ -237,17 +263,23 @@ def setup_english_handlers():
             )
             return
 
-        if response["type"] == "quiz_question":
+        if rtype == "quiz_question":
+            qmsg = response.get("message", "")
             _post_user_reply(
                 client,
                 channel_id,
                 user_id,
-                text=response["message"],
-                blocks=build_quiz_blocks(response["message"]),
+                text=qmsg,
+                blocks=build_quiz_blocks(qmsg),
             )
             return
 
-        _post_user_reply(client, channel_id, user_id, response["message"])
+        _post_user_reply(
+            client,
+            channel_id,
+            user_id,
+            response.get("message", "Something went wrong. Try `/english` again."),
+        )
 
     @app.action(re.compile("^english_select_writing_type_"))
     def handle_writing_type_selection(ack, body, client):
@@ -261,7 +293,12 @@ def setup_english_handlers():
         if handle_service_error(response, client, channel_id, user_id):
             return
 
-        _post_user_reply(client, channel_id, user_id, response["message"])
+        _post_user_reply(
+            client,
+            channel_id,
+            user_id,
+            response.get("message", "No task returned. Try `/english` again."),
+        )
 
     @app.action(re.compile("^english_quiz_answer_"))
     def handle_quiz_answer(ack, body, client):
@@ -275,20 +312,32 @@ def setup_english_handlers():
         if handle_service_error(response, client, channel_id, user_id):
             return
 
-        _post_user_reply(client, channel_id, user_id, response["message"])
+        _post_user_reply(
+            client,
+            channel_id,
+            user_id,
+            response.get("message", ""),
+        )
 
         next_payload = response.get("next")
         if next_payload:
-            if next_payload["type"] == "quiz_question":
+            ntype = next_payload.get("type")
+            if ntype == "quiz_question":
+                nmsg = next_payload.get("message", "")
                 _post_user_reply(
                     client,
                     channel_id,
                     user_id,
-                    text=next_payload["message"],
-                    blocks=build_quiz_blocks(next_payload["message"]),
+                    text=nmsg,
+                    blocks=build_quiz_blocks(nmsg),
                 )
             else:
-                _post_user_reply(client, channel_id, user_id, next_payload["message"])
+                _post_user_reply(
+                    client,
+                    channel_id,
+                    user_id,
+                    next_payload.get("message", ""),
+                )
 
 
 def build_quiz_blocks(message: str):
