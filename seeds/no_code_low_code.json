@@ -1,0 +1,102 @@
+{
+  "challenge_types": [
+    {
+      "id": "CHT-nc-form-to-sheet-notification",
+      "category": "no_code_low_code",
+      "name": "Form → doğrulanmış satır → Slack ping",
+      "description": "Airtable formları, Glide/Framer formu veya Typeform kullanarak yapılmış bir akış: yeni gönderim satıra yazılsın, basit doğrula kuralından geçişte Slack bildirimi (Make.com / Zapier / n8n seçilebilir).",
+      "deadline_hours": 20,
+      "points": 36,
+      "checklist": [
+        "Hangi araçların (form, tablo, otomasyon) birbirine bağlandığını ve her adımda hangi veri alanlarının aktığını (örneğin: gönderen e-posta, gönderim tarihi) yazılı şema olarak sunun.",
+        "Zorunlu alan boş kalırsa veya format hatalıysa akışın hata koluna düşeceği ve kullanıcıya veya moderatöre nasıl görüneceği açıklanmış olsun.",
+        "Otomasyon aracında geçici ağ kopması gibi durumlar için yeniden deneme ayarı varsa ne yaptığınızı, yoksa manuel düzeltme sürecini not edin.",
+        "Aynı kişinin veya olayın iki kez kayda geçmesini önlemek için tek bir net kural tanımlayın (ör. aynı e-posta ile aynı gün içinde ikinci gönderimi birleştir veya reddet).",
+        "Teslimde: akışın ekran görüntüsü veya araçların paylaştığı «scenario» bağlantısı ile birlikte, adım adım kılavuz metni README formatında sunulsun."
+      ],
+      "meta": {
+        "difficulty": "beginner",
+        "tools_hint": [
+          "airtable_or_form",
+          "automation_hub"
+        ]
+      }
+    },
+    {
+      "id": "CHT-nc-crm-micro-pipeline",
+      "category": "no_code_low_code",
+      "name": "Tek pipeline: görüşmeden sonra görev + e-posta + etiket",
+      "description": "HubSpot/Notion/Zoho benzeri basit iki modül seçin; sahne sahne otomatize edilmiş mini CRM sırasını tanımlayın (otomasyon aracı seçimi serbest).",
+      "deadline_hours": 24,
+      "points": 36,
+      "checklist": [
+        "Kaynak tablo veya formdaki her alanın hedef sistemdeki hangi alana karşılık geldiğini tablo halinde yazın (ör. «Lead kaynağı» → «Kaynak etiketi»).",
+        "Lead kaynağı veya segment gibi en az bir koşula göre farklı e-posta metni veya farklı görev ataması yapan bir dal çizin ve bu dalın ne zaman seçildiğini açıklayın.",
+        "E-posta alanının boş veya hatalı biçimde olduğu kayıtların nasıl filtreleneceğini veya reddedileceğini yazın.",
+        "Manuel test senaryoları: en az üç farklı girdiyle (ör. geçerli lead, eksik e-posta, bilinmeyen kaynak) akışın sonucunu tablo ile gösterin.",
+        "Otomasyonun kırıldığı veya harici API limit aştığı durumda ne yapılacağını (bildirim, kuyruk, manuel müdahale) kısa bir «iş sürekliliği» notuyla yazın."
+      ],
+      "meta": {
+        "difficulty": "beginner",
+        "topic": "crm_automation"
+      }
+    },
+    {
+      "id": "CHT-nc-approval-workflow-sheet",
+      "category": "no_code_low_code",
+      "name": "Onay kuyruğu: Google Sheets + Apps Script düşük kod",
+      "description": "`onaylandi` için satır güncellenince tetikleyen küçük bir Apps Script veya bağlı otomasyon; alternatif olarak Glide + tablo uyumu da kabul görür.",
+      "deadline_hours": 26,
+      "points": 40,
+      "checklist": [
+        "Kimlerin satırı onaylayabileceği veya durumu değiştirebileceği (rol veya e-posta listesi) net yazılsın.",
+        "İki kişi aynı satırı aynı anda değiştirirse ne olacağını düşünün; mümkünse «son yazma kazanır» veya «kilitleme» gibi tercihinizi ve sınırlarınızı açıklayın.",
+        "Script veya otomasyon hata verirse yöneticiye e-posta veya ayrı bir «hata günlüğü» sekmesi gibi bir geri bildirim yolu tanımlayın.",
+        "Tablonun periyodik yedek kopyası veya sürüm geçmişinin nasıl alınacağını tek paragraf halinde yazın.",
+        "Script içinde kullanılan gizli URL veya token örneklerini teslimatta maskelenmiş gösterin; canlı sırları asla düz metin paylaşmayın."
+      ],
+      "meta": {
+        "difficulty": "beginner_intermediate",
+        "topic": "sheets_apps_script"
+      }
+    },
+    {
+      "id": "CHT-nc-notion-internal-wiki-rollout",
+      "category": "no_code_low_code",
+      "name": "İç Wiki: kurumsal küçük rollout planı Notion ile",
+      "description": "Ekip içi üç sayfalık bilgi yapısı, izin politikası özeti ve yeni kullanıcıya günlük görev — kod yok, tamamen araç seçimi ile.",
+      "deadline_hours": 18,
+      "points": 36,
+      "checklist": [
+        "En fazla üç üst düzey sayfanın başlığını ve altında hangi alt konuların duracağını düz liste veya küçük ağaç şeklinde yazın.",
+        "Hangi sayfaların tüm takıma, hangilerinin yalnızca yönetime açık olacağı ve bu kararın gerekçesini üç cümlede özetleyin.",
+        "Sık karışan kavramlar için kısa bir sözlük veya sık kullanılan sayfalar listesi ekleyin.",
+        "Eski süreçten Notion’a geçiş için kullanıcıya verilecek adım adım kılavuz (ilk gün yapılacaklar) yazın.",
+        "Sayfa sahiplerini ve ne sıklıkla içerik gözden geçirileceğini (ör. üç ayda bir) belirten basit bir bakım tablosu hazırlayın."
+      ],
+      "meta": {
+        "difficulty": "beginner",
+        "topic": "knowledge_mgmt"
+      }
+    },
+    {
+      "id": "CHT-nc-monitoring-lite-webhook-alert",
+      "category": "no_code_low_code",
+      "name": "Webhook tabanlı hafif izleme (sağlık bildirimi)",
+      "description": "UptimeRobot, Better Stack veya n8n schedule ile düzenli tetiklenen doğrulanmış HTTP çağrısı başarılı değilse Slack veya Discord'a düşecek bildirimi tariflayın.",
+      "deadline_hours": 22,
+      "points": 36,
+      "checklist": [
+        "Tek seferlik ağ kopması yüzünden yanlış alarm üretmemek için: ikinci bir doğrulama adımı veya birkaç dakika bekleyip tekrar deneme kuralını metin olarak yazın.",
+        "Gece veya yoğun saatlerde bildirim sıklığını azaltmak istiyorsanız bunu hangi zaman aralığı ve hangi kanal için yapacağınızı belirtin.",
+        "Uyarı mesajına eklenecek zorunlu bilgileri listeleyin: örneğin bölge, kontrol zamanı, son başarılı yanıt kodu.",
+        "Canlı ortam adresi kullanmak zorunda değilsiniz; test için placeholder adres kullanıyorsanız bunu teslim dokümantasyonunda yazın.",
+        "Uyarı oluşunca izlenecek ilk adımlar için beş satırdan uzun olmayan bir «ilk müdahale» özeti yazın."
+      ],
+      "meta": {
+        "difficulty": "beginner",
+        "topic": "observability_lite"
+      }
+    }
+  ]
+}

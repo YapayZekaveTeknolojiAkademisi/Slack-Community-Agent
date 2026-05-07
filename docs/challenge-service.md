@@ -41,14 +41,15 @@ python -m services.challenge_service --fresh
 
 ```
 1. Background async event loop → ayrı thread
-2. PostgreSQL bağlantısı
-3. Slack Bolt handler'larının kayıt edilmesi
-4. Service Manager başlatılır:
+2. PostgreSQL bağlantısı (`db.initialize`)
+3. challenge_types seed: `seeds/*.json` okunur; `CHT-*` id DB’de yoksa eklenir, varsa atlanır — `packages/challenge_type_seeds.py` (JSON hatası veya doğrulama hatasında servis başlamaz)
+4. Slack Bolt handler'ların kayıt edilmesi (__main__.py import sırasında)
+5. Service Manager başlatılır:
    a. DB temizliği (moda göre)
    b. ChannelRegistry rebuild (DB'den)
    c. Monitörler başlatılır
-5. Startup bildirimleri Slack'e gönderilir
-6. Slack Socket Mode başlar (blocking)
+6. Startup bildirimleri Slack'e gönderilir
+7. Slack Socket Mode başlar (blocking)
 ```
 
 ---

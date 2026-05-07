@@ -347,6 +347,7 @@ async def _assign_jury_to_challenge(
                 "name": ct.name if ct else None,
                 "description": ct.description if ct else None,
                 "deadline_hours": ct.deadline_hours if ct else None,
+                "points": ct.points if ct else None,
                 "checklist": list(ct.checklist or []) if ct else [],
                 "category": ct.category.value.replace("_", " ").title() if ct else None,
             } if ct else None
@@ -388,6 +389,8 @@ async def _assign_jury_to_challenge(
                 project_lines.append(f"*📝 Proje Tanımı:* {ct['description']}")
             if ct["deadline_hours"]:
                 project_lines.append(f"*⏱ Süre:* {ct['deadline_hours']} saat")
+            if ct.get("points") is not None:
+                project_lines.append(f"*⭐ Şablon puanı:* `{ct['points']}`")
             eval_builder.add_text("\n".join(project_lines))
 
             checklist = ct["checklist"]

@@ -323,6 +323,7 @@ def _launch_challenge(client, category: ChallengeCategory, participants: list[st
             detail_lines.append(f"*📝 Açıklama:* {challenge_type.description}")
         if challenge_type.deadline_hours:
             detail_lines.append(f"*⏱ Süre:* `{challenge_type.deadline_hours}` saat")
+        detail_lines.append(f"*⭐ Şablon puanı:* `{challenge_type.points}`")
         builder.add_text("\n".join(detail_lines))
 
         checklist = challenge_type.checklist or []

@@ -38,6 +38,12 @@ class ChallengeType(Base, IDMixin, TimestampMixin):
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     deadline_hours: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    points: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=72,
+        comment="Challenge şablonunun ödül / ağırlık puanı (seeds içinde kategoriye göre)",
+    )
     checklist: Mapped[list | None] = mapped_column(JSONB, nullable=True, comment="Projenin kabul edilmesi için tamamlanması gereken adımlar (string listesi)")
     meta: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
 

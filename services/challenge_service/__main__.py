@@ -3,7 +3,7 @@ Challenge Service — Entry Point
 
 Başlatma sırası:
   1. Logger
-  2. DB bağlantısı
+  2. DB bağlantısı + challenge_types seed (seeds/*.json, eksik CHT-* eklenir)
   3. Bolt handler'ları kayıt et (challenge, feature_request, event, english, summary)
   4. Background event loop aç + set_loop()
   5. service_manager.start() (DB temizliği, registry, monitörler)
@@ -45,6 +45,18 @@ async def _startup(mode: StartupMode) -> None:
     """DB + service_manager'ı başlatır."""
     db.initialize()
     _logger.info("[Challenge Service] DB initialized")
+
+    from packages.challenge_type_seeds import sync_challenge_types
+
+    try:
+        async with db.session() as session:
+            await sync_challenge_types(session)
+    except ValueError as exc:
+        _logger.critical("[Challenge Service] challenge_types seed başarısız: %s", exc)
+        raise
+    except Exception as exc:
+        _logger.critical("[Challenge Service] challenge_types seed I/O veya DB hatası: %s", exc, exc_info=True)
+        raise
 
     from packages.settings import get_settings as _gs
     if not _gs().smtp_enabled:

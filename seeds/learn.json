@@ -1,0 +1,218 @@
+{
+  "challenge_types": [
+    {
+      "id": "CHT-learn-http-rest-micro",
+      "category": "learn",
+      "name": "Mini REST: kaynak koleksiyonu (CRUD)",
+      "description": "Tek bir kaynak (örn. Görev veya Ürün) için GET list/detail, POST, PATCH, DELETE ile HTTP uyumlu bir mini API yazın.",
+      "deadline_hours": 24,
+      "points": 28,
+      "checklist": [
+        "Boş gövde veya bilinçli olarak yanlış/olmayan ID ile istek gönderildiğinde API’nin uygun doğrulama ve hata mesajı döndürdüğünü gösterin.",
+        "Her hata için okunabilir bir JSON gövdesi ve doğru HTTP durum kodunu (ör. 400, 404, 422) sürekli biçimde kullanın.",
+        "README içinde yerel kurulum adımları ve en az bir tam çalıştırma için örnek curl (veya eşdeğer) komutları olsun.",
+        "Üç veya daha fazla otomatik test yazın (birim, entegrasyon veya fonksiyonel); neyi doğruladıkları kısaca yazılmış olsun.",
+        "Veritabanı zorunlu değildir; tek dosyada kalıcı olmayan hafızada bile tutabilirsiniz, ancak veri katmanına giden kod net bir arabirimle ayrılmalıdır."
+      ],
+      "meta": {
+        "difficulty": "beginner",
+        "stack_hint": "any"
+      }
+    },
+    {
+      "id": "CHT-learn-flask-json-api",
+      "category": "learn",
+      "name": "Flask: JSON-only API ve blueprint",
+      "description": "Flask ile blueprint kullanarak JSON kabul/eden küçük bir servis oluşturun (örneğin notlar veya etiketler).",
+      "deadline_hours": 28,
+      "points": 28,
+      "checklist": [
+        "Flask sürümü requirements.txt içinde sabit bir sürüm numarası ile yazılı olsun.",
+        "`/api/` ön ekli iki ayrı uç kümesini ya da iki Flask blueprint ile organize edilmiş uçları net şekilde ayırın.",
+        "İstemci JSON göndermiyorsa veya yanlış Content-Type kullanıyorsa nasıl tepki verileceği açıklanmış olsun; uygunsa 415 (Unsupported Media Type) kullanımını belirtin.",
+        "Çalıştırma parametreleri için ortam değişkeni veya .env kullanımı (örnek: port veya Flask secret_key) dokümante edilmiş olsun.",
+        "README’de `flask run` benzeri komut ile sunucunun nasıl açılacağı ve gövdeli örnek bir POST isteği yazılı olsun."
+      ],
+      "meta": {
+        "difficulty": "beginner",
+        "stack_hint": "flask"
+      }
+    },
+    {
+      "id": "CHT-learn-fastapi-async-crud",
+      "category": "learn",
+      "name": "FastAPI: async endpoint + Pydantic v2 şemalar",
+      "description": "FastAPI kullanarak asyncio uyumlu uçlar ve `BaseModel` ile giriş/çıkış şemalarını tanımlayın.",
+      "deadline_hours": 28,
+      "points": 28,
+      "checklist": [
+        "Pydantic v2 ile giriş ve çıkış modellerinde en az bir alanda `Field` ile uzunluk, aralık veya regex gibi anlamlı kısıtlar tanımlayın.",
+        "Uçların OpenAPI çıktısında doğal görünmesi beklenir; tarayıcıdan `/docs` altında dokümana erişilebildiğini README’de belirtin.",
+        "Tek sefer ayarlanması gereken bağımlılık (basit bir sahte depo nesnesi yeterli) için `lifespan` veya startup hook kullanılıyor olmalı ve bu README’de açıklansın.",
+        "Sunucuyu `uvicorn` ile başlatma komutu README’de açıkça yazılmış olsun.",
+        "En az bir uç için geçersiz istek geldiğinde `HTTPException` ile anlamlı bir durum kodu ve mesaj dönülüyor olmalı; hangi örneklerde olduğunu kısa açıklayın."
+      ],
+      "meta": {
+        "difficulty": "beginner",
+        "stack_hint": "fastapi"
+      }
+    },
+    {
+      "id": "CHT-learn-sqlalchemy-repo",
+      "category": "learn",
+      "name": "SQLAlchemy (async): repository katmanı",
+      "description": "AsyncSQLAlchemy 2 ile bir tablo, repository sınıfı ve basit kullanım senaryoları (liste, oluştur, güncelle).",
+      "deadline_hours": 36,
+      "points": 32,
+      "checklist": [
+        "PostgreSQL veya SQLite bağlantısı; bağlantı satırının ortam değişkeninden okunduğu README’de yazılı olsun.",
+        "`AsyncSession` kullanın; rutin CRUD işlemlerinde doğrudan ham SQL string yerine SQLAlchemy ORM tercih edin.",
+        "Şema oluşturma yaklaşımını (Alembic migrasyonları veya geliştirme için oluştur-çalıştır gibi başka seçenek) README’de gerekçesiyle birlikte açıklayın.",
+        "Repository içinde işlem başlangıcı ve bitişi net olsun: bir işlem sırasında hata oluşursa yapılmamış güncelleme görünmez (transaction sınırları anlaşılır).",
+        "Testler küçük bir seed verisi yüklenebilir veya her test öncesi tablo durumu temizlenebilir; nasıl olduğu kısa anlatılsın."
+      ],
+      "meta": {
+        "difficulty": "intermediate",
+        "stack_hint": "sqlalchemy"
+      }
+    },
+    {
+      "id": "CHT-learn-jwt-cookie-tradeoffs",
+      "category": "learn",
+      "name": "Auth 101: şifre hash + bearer token prototipi",
+      "description": "Kayıt ve giriş uçları; şifreyi uygun şekilde hash'leyin; başarılı girişte imzalı veya deterministic olmayan token üretin ve korumalı örnek uç ekleyin.",
+      "deadline_hours": 40,
+      "points": 32,
+      "checklist": [
+        "Veritabanında veya loglarda şifrenin düz metin olarak asla görünmemesi gerekir; kullanılan hash yöntemini (ör. bcrypt/argon2) README’ye yazın.",
+        "Tokenların ne zaman geçersiz sayılacağı veya basit iptal yaklaşımı README’de açıklanmış olsun.",
+        "Korumalı bir örnek ucu hem geçerli token ile hem yanlış/eksik token ile denediğinizde beklenen yanıtları gösteren kısa tablo veya paragraf ekleyin.",
+        "JWT imzalama anahtarı veya benzeri gizlinin yalnızca kod içine gömülü değil, ortam değişkeninden okunduğu belirtilsin.",
+        "Kısa bir “tehdit modeli veya seçim özeti”: tarayıcı tarafına token verirseniz XSS riski veya Bearer header kullanırsanız uygun güvenlik notları bir paragraf halinde yazılmış olsun."
+      ],
+      "meta": {
+        "difficulty": "intermediate",
+        "stack_hint": "security_intro"
+      }
+    },
+    {
+      "id": "CHT-learn-cli-etl-mini",
+      "category": "learn",
+      "name": "CLI: argparse + küçük ETL örneği",
+      "description": "Komut satırından dosya girişi alan ve satırları dönüştürüp (filtre/normalize/birleştir) çıktı üreten bir araç yazın.",
+      "deadline_hours": 22,
+      "points": 28,
+      "checklist": [
+        "Girdi için `--input` ve `--output` dosya yolu veya standart akış kullanılabilsin (tercihen kullanıcıya seçenek açıklanmış olsun).",
+        "Dosya kodlaması uyumsuz veya beklenmedik biçimde olduğunda anlamlı Türkçe veya İngilizce hata mesajı ve sıfır olmayan çıkış kodu üretin.",
+        "Paket yapısı: `requirements.txt` veya `pyproject.toml` dosyasında bağımlılıklar listelesin ve program `python -m paket.main` ya da konsol giriş noktası ile çalıştırılabilsin.",
+        "README’de aracın üç farklı örnek komutla nasıl kullanılacağını yazın — örneğin filtre parametreleri ve örnek bir girdi dosyası adı.",
+        "Çıktı davranışını doğrulayan en az küçük bir pytest testi yazılmış olsun; testlerin çalıştırma komutu README’de olsun."
+      ],
+      "meta": {
+        "difficulty": "beginner",
+        "stack_hint": "cli"
+      }
+    },
+    {
+      "id": "CHT-learn-ds-pandas-tabular-101",
+      "category": "learn",
+      "name": "Veri bilimi: pandas ile tablolu veri keşfi",
+      "description": "Örnek bir CSV (ör. ürün satışları veya sensör okumaları) ile pandas kullanarak ilk keşif raporu: boyut, tipler, eksik değerler ve temel özet istatistikler.",
+      "deadline_hours": 26,
+      "points": 29,
+      "checklist": [
+        "`read_csv` veya eşdeğeri ile veriyi yükleyin; ayırıcı ve kodlama seçiminizi README’de yazın.",
+        "`info()`, `describe()`, en az bir sayısal sütun için histogram veya kut grafik (matplotlib/plotly/seaborn serbest) ile tek görsel üretin; görseli repo’ya veya `figures/` altına koyun.",
+        "Eksik değerleri sütun bazında sayan ve en az iki anlamlı doldurma veya eleme stratejisini (forward-fill, medyan, satır düşürme) kıyaslayan kısa bir paragraf veya kod hücre özeti yazın.",
+        "`requirements.txt` veya `pyproject.toml` ile pandas ve görselleştirme kütüphanelerinin sabit sürümü yazılı olsun.",
+        "`pytest` ile en az iki küçük test: örneğin yardımcı bir fonksiyonun beklenen DataFrame şeklini veya null sayımını doğrulayan testler."
+      ],
+      "meta": {
+        "difficulty": "beginner",
+        "stack_hint": "pandas",
+        "topic": "data_science"
+      }
+    },
+    {
+      "id": "CHT-learn-ai-supervised-metrics-101",
+      "category": "learn",
+      "name": "Yapay öğrenim: sınıflandırma metrikleri (doğruluk, kesinlik, duyarlılık)",
+      "description": "İkili veya çok sınıflı küçük bir örnek üzerinde confusion matrix, accuracy, precision, recall ve F1 kavramlarını hesaplayıp yorumlayın; sınıf dengesizliğinde neden yanıltıcı olabileceğini açıklayın.",
+      "deadline_hours": 24,
+      "points": 28,
+      "checklist": [
+        "En az 4x4’ten küçük olmayan gerçek/tahmin çiftleri ile elle veya `sklearn.metrics` ile confusion matrix üretin; matrisi README veya notebook’ta gösterin.",
+        "Precision, recall ve F1 için hem «micro» hem bir sınıf için «macro» veya tek sınıfa özgü hesap seçimi yapın; seçimin gerekçesini iki cümlede yazın.",
+        "Sınıf oranları çarpık olduğunda (ör. pozitif %5) accuracy’nin tek başına neden riskli olduğunu somut rakamla gösteren mini senaryo ekleyin.",
+        "Kodu modüler tutun (ör. `metrics_from_confusion(cm) -> dict` gibi küçük bir fonksiyon).",
+        "En az iki birim testi: örneğin bilinen küçük matris için beklenen precision/recall çıktısı."
+      ],
+      "meta": {
+        "difficulty": "beginner",
+        "stack_hint": "sklearn_or_manual",
+        "topic": "machine_learning"
+      }
+    },
+    {
+      "id": "CHT-learn-ai-llm-api-safe-usage",
+      "category": "learn",
+      "name": "LLM API güvenli kullanım: anahtar, kota ve çıktı sınırları",
+      "description": "Sağlayıcıdan birini seçin veya yapay/mock istemci kullanın: ortam değişkeninden API anahtarı, zaman aşımı, max token ve basit kullanım politikası (loglarda ham anahtar yok) ile tek dosyalık minimal örnek.",
+      "deadline_hours": 22,
+      "points": 30,
+      "checklist": [
+        "API anahtarı yalnızca ortam değişkeninden okunmalı; repo’da örnek için `.env.example` içinde yalnızca boş/placeholder anahtar adları olsun.",
+        "İstek öncesi `max_tokens`, `temperature` ve `timeout` seçimlerinin ne işe yaradığı README’de madde madde açıklanmış olsun.",
+        "429 veya zaman aşımı durumunda kullanıcıya dönüş: en az iki cümlelik hata mesajı taslağı ve programın sıfır dışı çıkış kodu davranışı.",
+        "**Asla günlükte tam prompt/PII** yazılmaması için maskeleme veya truncation kuralınızı kısa bir politika olarak yazın.",
+        "Gerçek ağ çağrısı yapılmıyorsa `unittest.mock` veya küçük sahte HTTP sunucusu ile ana akışın test edildiğini gösterin."
+      ],
+      "meta": {
+        "difficulty": "beginner",
+        "stack_hint": "httpx_or_openai_compatible",
+        "topic": "llm_ops_intro"
+      }
+    },
+    {
+      "id": "CHT-learn-ds-stats-hypothesis-mini",
+      "category": "learn",
+      "name": "Veri bilimi: özet istatistik ve basit A/B düşüncesi",
+      "description": "İki küçük örneklem (ör. A/B gruplarının dönüşüm oranı veya süreleri) için ortalama, standart sapma ve güven aralığı veya basit permütasyon fikri düzeyinde karşılaştırma yazın; p-hacking tuzaklarından bahsedin.",
+      "deadline_hours": 28,
+      "points": 31,
+      "checklist": [
+        "Veriyi sentetik veya açık lisanslı küçük bir CSV ile oluşturun; kaynağı README’de belirtin.",
+        "Her grup için n, ortalama ve standart sapma tablosunu sunun.",
+        "En az bir yöntem: normal yaklaşık güven aralığı, bootstrap yüzdelikleri veya basit randomization testinden biri — formülü veya kütüphane çağrısını kısa açıklayın.",
+        "«Birden fazla metriğe bakıp en iyi görüneni seçmenin» (p-hacking) riskini üç cümlelik örnek senaryoyla anlatın.",
+        "Çıktıları üreten kod tekrarlanabilir bir seed (`numpy.random.seed` veya equivalent) ile sabitlenebilsin."
+      ],
+      "meta": {
+        "difficulty": "intermediate",
+        "stack_hint": "numpy_scipy_stats",
+        "topic": "statistics"
+      }
+    },
+    {
+      "id": "CHT-learn-ai-vectors-embeddings-kavram",
+      "category": "learn",
+      "name": "Gömü vektörleri: cosine benzerlik + küçük el yapımı örnek",
+      "description": "Metin gerekmeyebilir: 5–10 boyutlu vektörlerle cosine similarity tanımını uygulayın; embeddings’in «anlam uzayında yakınlık» metaforunu ve norm etkisini README’de açıklayın.",
+      "deadline_hours": 20,
+      "points": 29,
+      "checklist": [
+        "`numpy` veya saf Python ile cosine similarity fonksiyonu yazın; sıfır vektör veya uyumsuz boyut için anlamlı hata mesajları verin.",
+        "En az üç vektör çiftinde beklenen benzerlik sıralamasını (ör. daha yakın olan çift daha yüksek skor) tabloyla gösterin.",
+        "L2 normalize etmenin sonucu nasıl etkilediğini iki cümlede yorumlayın.",
+        "`sklearn.metrics.pairwise.cosine_similarity` ile kendi fonksiyonunuzun tutarlılığını tek küçük testte doğrulayın.",
+        "README’de «neden cosine, ne zaman Euclidean» için madde işaretli kısa kılavuz olsun."
+      ],
+      "meta": {
+        "difficulty": "beginner",
+        "stack_hint": "numpy",
+        "topic": "embeddings_intro"
+      }
+    }
+  ]
+}

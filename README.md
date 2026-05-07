@@ -23,7 +23,8 @@ Slack Community Agent
 │   ├── database/            PostgreSQL + SQLAlchemy async ORM + repository
 │   ├── slack/               Slack Bolt + SDK istemcisi + Block Kit yardımcıları
 │   ├── smtp/                E-posta bildirimleri (opsiyonel)
-│   └── logger/              Merkezi loglama
+│   ├── logger/              Merkezi loglama
+│   └── challenge_type_seeds.py  challenge_types seeds (servis açılışında DB ile senkron)
 │
 ├── services/
 │   └── challenge_service/   Ana servis
@@ -31,6 +32,7 @@ Slack Community Agent
 │       ├── core/            Kuyruk, registry, monitörler
 │       └── config/          Değerlendirme kriterleri (criteria.json)
 │
+├── seeds/                   challenge_types için JSON (dosya adı = kategori kökü; `id`: CHT-*; `points` elle)
 ├── migrations/              Alembic migration dosyaları
 ├── migrate.py               Migration CLI aracı
 └── .env.template            Ortam değişkeni şablonu
@@ -84,6 +86,8 @@ SLACK_COMMAND_CHANNELS=C0123456789
 ```bash
 python migrate.py upgrade
 ```
+
+Challenge tipleri (`challenge_types`): **`python -m services.challenge_service` ile ilk DB oturumu açıldığında** `seeds/*.json` üzerinden senkronize edilir (`packages/challenge_type_seeds.py`). **`id`** `CHT-` ile başlamalı ve veritabanında aynı id varsa satır **atlanır**, yoksa **eklenir**. Her satırda şablon **`points`** JSON içinde **elle** yazılmalıdır (tamsayı; kategori bantları bu modülde tanımlı). `challenge_types.points` kolonu migrasyon `0005` ile eklenir.
 
 Detaylar için → [Migration Rehberi](docs/migration.md)
 
