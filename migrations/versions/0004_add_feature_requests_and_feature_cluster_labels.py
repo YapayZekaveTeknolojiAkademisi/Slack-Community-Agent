@@ -46,6 +46,7 @@ def upgrade() -> None:
         sa.Column("status", sa.String(), nullable=False),
         sa.Column("cluster_id", sa.Integer(), nullable=True),
         sa.Column("fraud_score", sa.Float(), nullable=True),
+        sa.Column("retry_count", sa.Integer(), nullable=False, server_default="0"),
         sa.Column("id", sa.String(length=60), nullable=False),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
