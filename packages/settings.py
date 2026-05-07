@@ -284,51 +284,26 @@ class SystemSettings(BaseSettings):
             "feature_request_embed_retry_minute",
         ),
     )
-    feature_request_clustering_weekday: int = Field(
-        2,
-        ge=0,
-        le=6,
-        validation_alias=AliasChoices(
-            "FEATURE_REQUEST_CLUSTERING_WEEKDAY",
-            "feature_request_clustering_weekday",
-        ),
-        description="Kumeleme gunu (0=Pzt ... 6=Paz)",
-    )
-    feature_request_cluster_fail_before_pipeline_hour: int = Field(
-        2,
+    feature_request_cluster_retry_hour: int = Field(
+        4,
         ge=0,
         le=23,
         validation_alias=AliasChoices(
-            "FEATURE_REQUEST_CLUSTER_FAIL_BEFORE_PIPELINE_HOUR",
-            "feature_request_cluster_fail_before_pipeline_hour",
+            "FEATURE_REQUEST_CLUSTER_RETRY_HOUR",
+            "feature_request_cluster_retry_hour",
         ),
+        description="clustering_failed kayıtlarını yeniden kümelemeye sokmak için günlük saat",
     )
-    feature_request_cluster_fail_before_pipeline_minute: int = Field(
+    feature_request_cluster_retry_minute: int = Field(
         0,
         ge=0,
         le=59,
         validation_alias=AliasChoices(
-            "FEATURE_REQUEST_CLUSTER_FAIL_BEFORE_PIPELINE_MINUTE",
-            "feature_request_cluster_fail_before_pipeline_minute",
+            "FEATURE_REQUEST_CLUSTER_RETRY_MINUTE",
+            "feature_request_cluster_retry_minute",
         ),
     )
-    feature_request_clustering_hour: int = Field(
-        3,
-        ge=0,
-        le=23,
-        validation_alias=AliasChoices(
-            "FEATURE_REQUEST_CLUSTERING_HOUR", "feature_request_clustering_hour"
-        ),
-    )
-    feature_request_clustering_minute: int = Field(
-        0,
-        ge=0,
-        le=59,
-        validation_alias=AliasChoices(
-            "FEATURE_REQUEST_CLUSTERING_MINUTE",
-            "feature_request_clustering_minute",
-        ),
-    )
+
     feature_request_report_weekday: int = Field(
         5,
         ge=0,

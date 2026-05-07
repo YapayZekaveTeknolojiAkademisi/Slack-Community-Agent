@@ -8,7 +8,8 @@ Feature Request Servisi
   check_weekly_quota()      → Bu hafta kaç submit hakkı kaldı?
   find_similar_this_week()  → Bu haftaki kayıtlarla cosine similarity karşılaştırması
   detect_fraud()            → Farklı kullanıcılardan gelen benzer vektörleri tespit et
-  run_clustering_pipeline() → status=embedded → L2 norm → UMAP → HDBSCAN → label → DB yaz
+  run_clustering_pipeline()    → status=embedded → L2 norm → UMAP → HDBSCAN → label → DB yaz
+  retry_clustering_failed()    → status=clustering_failed → status=embedded (pipeline'a tekrar girer)
   generate_admin_report()   → Kümelenmiş verilerden Groq ile Türkçe rapor üret
 
 BAĞIMLILIKLAR
@@ -24,12 +25,12 @@ DÖNÜŞ TİPLERİ (submit_request)
   {"status": "quota_exceeded",  "used": 2, "max": 2}
 """
 
-from collections import defaultdict
-from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
 import logging
 import os
 import tempfile
+from collections import defaultdict
+from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 # Numba önce NUMBA_CACHE_DIR ile yazılabilir bir kök arar; yoksa site-packages/__pycache__
@@ -42,6 +43,7 @@ os.environ.setdefault(
 import hdbscan
 import numpy as np
 import umap
+from sklearn.cluster import AgglomerativeClustering
 
 from packages.clients.groq import GroqClient
 from packages.database.models.feature_request import FeatureClusterLabel, FeatureRequest
@@ -82,8 +84,44 @@ class ClusteringParams:
 
 FIXED_CLUSTERING_PARAMS: ClusteringParams | None = None
 
+# ---------------------------------------------------------------------------
+# Fallback algoritma eşik değerleri
+# ---------------------------------------------------------------------------
 
-def _umap_params_for_sample_count(n_samples: int, params: ClusteringParams) -> tuple[int, int, dict]:
+DIRECT_DUMP_MAX_RECORDS: int = 5
+"""Bu sayı veya daha az embedded kayıt varsa kümeleme yapılmaz; kayıtlar
+rapora direkt listelenir ve reported olarak işaretlenir."""
+
+HDBSCAN_MIN_RECORDS: int = 20
+"""Bu sayıdan az embedded kayıt varsa UMAP atlanır, Agglomerative Clustering
+ön izleme modunda çalışır (status değişmez, kayıtlar sonraki haftaya taşınır)."""
+
+FALLBACK_DISTANCE_THRESHOLD: float = 0.7
+"""Agglomerative Clustering için cosine distance eşiği.
+cosine distance 0.7 → cosine similarity ≈ 0.755.
+Linkage: average + metric: cosine (L2 normalizasyon gerekmez)."""
+
+
+@dataclass
+class _RecordSnapshot:
+    """Session bağımsız hafif kayıt temsili.
+
+    SQLAlchemy ORM nesneleri bir oturum kapandıktan sonra "detached" hale gelir
+    ve lazy-load tetikleyebilir. Oturumlar arası veri taşımak için bu sınıf
+    ilgili primitive alanları kopyalar; generate_admin_report ve preview
+    yapıları bu nesneleri ORM nesnesiyle aynı attribute adları üzerinden tüketir.
+    """
+
+    id: str
+    request_raw: str
+    cluster_id: int | None = None
+    fraud_score: float | None = None
+    user_id: str = ""
+
+
+def _umap_params_for_sample_count(
+    n_samples: int, params: ClusteringParams
+) -> tuple[int, int, dict]:
     """
     UMAP spektral başlatma scipy eigsh ile k < N ister; n_components ve n_neighbors üst sınırı taşarsa TypeError oluşur (az kayıt).
     """
@@ -185,7 +223,9 @@ class FeatureRequestService:
                     self.logger,
                     "submit_embed_ok",
                     user_id=user_id,
-                    embedding_dims=list(vector.shape) if hasattr(vector, "shape") else None,
+                    embedding_dims=list(vector.shape)
+                    if hasattr(vector, "shape")
+                    else None,
                     text_chars=len(raw_text or ""),
                 )
             except Exception as exc:
@@ -641,17 +681,31 @@ class FeatureRequestService:
                     "preview_labels": {},
                 }
 
-            # --- Vektör matrisini oluştur ---
-            vectors = []
-            valid_ids = []
+            # --- Primitive kopyalar: session kapandıktan sonra ORM nesnelerine erişilemez ---
+            raw_texts: dict[str, str] = {}
+            retry_counts: dict[str, int] = {}
+            fraud_scores: dict[str, float | None] = {}
+            user_ids: dict[str, str] = {}
+
+            vectors: list = []
+            valid_ids: list[str] = []
+            invalid_record_ids: list[str] = []
+
             for record in embedded:
+                raw_texts[record.id] = record.request_raw
+                retry_counts[record.id] = record.retry_count or 0
+                fraud_scores[record.id] = record.fraud_score
+                user_ids[record.id] = record.user_id
+
                 if record.request_embedded is None:
+                    invalid_record_ids.append(record.id)
                     continue
                 try:
                     vec = np.array(record.request_embedded, dtype=np.float32)
                     vectors.append(vec)
                     valid_ids.append(record.id)
                 except Exception as exc:
+                    invalid_record_ids.append(record.id)
                     self.logger.warning(
                         f"BLOB okuma hatası, atlanıyor: {exc}",
                         extra={"record_id": record.id},
@@ -668,53 +722,177 @@ class FeatureRequestService:
                 sample_request_ids=valid_ids[:20],
             )
 
-            if len(vectors) < 3:
+            n = len(vectors)
+
+            # ──────────────────────────────────────────────────────────────
+            # Yol 1 — Direkt Listeleme (n ≤ DIRECT_DUMP_MAX_RECORDS)
+            # Kümeleme yapılmaz; kayıtlar rapora direkt listelenir ve
+            # reported olarak işaretlenir.
+            # ──────────────────────────────────────────────────────────────
+            if n <= DIRECT_DUMP_MAX_RECORDS:
                 _clustering_trace(
                     self.logger,
-                    "pipeline_abort",
-                    reason="below_min_samples",
-                    min_required=3,
-                    valid_vectors=len(vectors),
-                    request_ids=valid_ids,
+                    "pipeline_direct_list",
+                    reason="too_few_for_clustering",
+                    n=n,
+                    threshold=DIRECT_DUMP_MAX_RECORDS,
                 )
                 self.logger.info(
-                    f"Kümeleme için yeterli kayıt yok (mevcut={len(vectors)}, min=3)."
+                    f"Direkt listeleme yolu (n={n} ≤ {DIRECT_DUMP_MAX_RECORDS})."
                 )
+                direct_records = [
+                    _RecordSnapshot(
+                        id=rid,
+                        request_raw=raw_texts[rid],
+                        fraud_score=fraud_scores[rid],
+                        user_id=user_ids[rid],
+                    )
+                    for rid in valid_ids
+                ]
+                if not is_preview:
+                    await fr_repo.mark_reported(valid_ids)
+                    if invalid_record_ids:
+                        for rid in invalid_record_ids:
+                            r = await fr_repo.get(rid)
+                            if r:
+                                r.status = "embedding_failed"
+                        await session.flush()
                 return {
+                    "pipeline_type": "direct_list",
                     "clustered": 0,
-                    "noise": len(vectors),
+                    "noise": 0,
                     "new_labels": 0,
+                    "direct_records": direct_records,
                     "preview_records": [],
                     "preview_labels": {},
                 }
 
-            # --- L2 normalizasyon ---
-            matrix = np.array(vectors, dtype=np.float32)
-            norms = np.linalg.norm(matrix, axis=1, keepdims=True)
-            norms = np.where(norms == 0, 1.0, norms)  # sıfır bölme koruması
-            matrix = matrix / norms
+            # ──────────────────────────────────────────────────────────────
+            # Yol 2 — Agglomerative Ön İzleme (DIRECT_DUMP_MAX_RECORDS < n < HDBSCAN_MIN_RECORDS)
+            # UMAP atlanır, ham vektörler üzerinde Agglomerative Clustering
+            # çalışır. Status değişmez; kayıtlar sonraki haftaya taşınır.
+            # ──────────────────────────────────────────────────────────────
+            if n < HDBSCAN_MIN_RECORDS:
+                _clustering_trace(
+                    self.logger,
+                    "pipeline_agglomerative_preview",
+                    n=n,
+                    distance_threshold=FALLBACK_DISTANCE_THRESHOLD,
+                    linkage="average",
+                    metric="cosine",
+                )
+                self.logger.info(
+                    f"Agglomerative ön izleme yolu (n={n}, "
+                    f"eşik={FALLBACK_DISTANCE_THRESHOLD})."
+                )
+                raw_matrix = np.array(vectors, dtype=np.float32)
+                agg = AgglomerativeClustering(
+                    n_clusters=None,
+                    distance_threshold=FALLBACK_DISTANCE_THRESHOLD,
+                    metric="cosine",
+                    linkage="average",
+                )
+                agg_labels = agg.fit_predict(raw_matrix)
 
-            # --- Parametreler ---
-            params = FIXED_CLUSTERING_PARAMS or ClusteringParams.from_batch_size(
-                len(vectors)
-            )
+                # Geçersiz embedding'leri session içinde işaretle (session kısa ömürlü, Groq yok)
+                if invalid_record_ids and not is_preview:
+                    for rid in invalid_record_ids:
+                        r = await fr_repo.get(rid)
+                        if r:
+                            r.status = "embedding_failed"
+                    await session.flush()
 
-            _clustering_trace(
-                self.logger,
-                "pipeline_params",
-                is_preview=is_preview,
-                source="fixed" if FIXED_CLUSTERING_PARAMS else "dynamic_from_batch",
-                hdbscan_min_cluster_size=params.min_cluster_size,
-                hdbscan_min_samples=params.min_samples,
-                umap_n_components_requested=params.n_components,
-                umap_n_neighbors_requested=params.n_neighbors,
-                batch_size=len(vectors),
-            )
+                # Groq için gereken veriyi primitive olarak topla; session kapandıktan sonra kullanılacak
+                agg_cluster_data: dict[int, tuple[list[str], list[int]]] = {}
+                for cid in set(int(lb) for lb in agg_labels):
+                    c_indices = [i for i, lb in enumerate(agg_labels) if lb == cid]
+                    s_ids = [valid_ids[i] for i in c_indices[:5]]
+                    s_texts = [raw_texts[sid] for sid in s_ids]
+                    agg_cluster_data[cid] = (s_texts, c_indices)
 
+            # ──────────────────────────────────────────────────────────────
+            # Yol 3 — HDBSCAN öncesi: mevcut cluster label ID'lerini pre-fetch et
+            # (Groq çağrısı session dışında olacak; hangi cluster'ların label'ı
+            #  var sorusu session kapanmadan cevaplanmalı)
+            # ──────────────────────────────────────────────────────────────
+            existing_cluster_ids: set[int] = await fcl_repo.list_all_cluster_ids()
+
+        # ═══════════════════════════════════════════════════════════════════
+        # SESSION 1 KAPANDI — ORM nesnelerine artık erişilmez
+        # Bundan sonra yalnızca primitive kopyalar (raw_texts, valid_ids vb.)
+        # ve numpy dizileri kullanılır.
+        # ═══════════════════════════════════════════════════════════════════
+
+        # --- Yol 2 tamamlama: Groq çağrısı (session-free) ---
+        if n < HDBSCAN_MIN_RECORDS:
+            preview_records_agg: list[_RecordSnapshot] = []
+            preview_labels_agg: dict[int, str] = {}
+
+            for cid, (s_texts, c_indices) in agg_cluster_data.items():
+                label_text = await self._generate_cluster_label(cid, s_texts)
+                preview_labels_agg[cid] = label_text
+                for idx in c_indices:
+                    preview_records_agg.append(
+                        _RecordSnapshot(
+                            id=valid_ids[idx],
+                            request_raw=raw_texts[valid_ids[idx]],
+                            cluster_id=cid,
+                            fraud_score=fraud_scores[valid_ids[idx]],
+                            user_id=user_ids[valid_ids[idx]],
+                        )
+                    )
+
+            # Status DEĞİŞMEZ — embedded kalır, sonraki haftaya taşınır
+            return {
+                "pipeline_type": "agglomerative_preview",
+                "clustered": len(preview_records_agg),
+                "noise": 0,
+                "new_labels": len(preview_labels_agg),
+                "preview_records": preview_records_agg,
+                "preview_labels": preview_labels_agg,
+            }
+
+        # ──────────────────────────────────────────────────────────────
+        # Yol 3 — HDBSCAN Pipeline (n ≥ HDBSCAN_MIN_RECORDS)
+        # Faz 2: L2 norm → UMAP → HDBSCAN → Groq  (session yok)
+        # ──────────────────────────────────────────────────────────────
+
+        # --- L2 normalizasyon ---
+        matrix = np.array(vectors, dtype=np.float32)
+        norms = np.linalg.norm(matrix, axis=1, keepdims=True)
+        norms = np.where(norms == 0, 1.0, norms)  # sıfır bölme koruması
+        matrix = matrix / norms
+
+        # --- Parametreler ---
+        params = FIXED_CLUSTERING_PARAMS or ClusteringParams.from_batch_size(
+            len(vectors)
+        )
+
+        _clustering_trace(
+            self.logger,
+            "pipeline_params",
+            is_preview=is_preview,
+            source="fixed" if FIXED_CLUSTERING_PARAMS else "dynamic_from_batch",
+            hdbscan_min_cluster_size=params.min_cluster_size,
+            hdbscan_min_samples=params.min_samples,
+            umap_n_components_requested=params.n_components,
+            umap_n_neighbors_requested=params.n_neighbors,
+            batch_size=len(vectors),
+        )
+
+        compute_error: Exception | None = None
+        labels = None
+        new_cluster_labels: dict[int, str] = {}
+        groq_labels_detail: dict[str, Any] = {}
+        reduced = None
+        n_neighbors_umap = n_components_umap = 0
+        umap_extra: dict = {}
+
+        try:
             # --- UMAP boyut indirgeme ---
             n_samples = len(vectors)
-            n_neighbors_umap, n_components_umap, umap_extra = _umap_params_for_sample_count(
-                n_samples, params
+            n_neighbors_umap, n_components_umap, umap_extra = (
+                _umap_params_for_sample_count(n_samples, params)
             )
             _clustering_trace(
                 self.logger,
@@ -733,41 +911,19 @@ class FeatureRequestService:
                 n_neighbors_umap,
                 umap_extra.get("init", "default"),
             )
-            try:
-                reducer = umap.UMAP(
-                    n_components=n_components_umap,
-                    metric="cosine",
-                    n_neighbors=n_neighbors_umap,
-                    random_state=42,
-                    **umap_extra,
-                )
-                reduced = reducer.fit_transform(matrix)
-                _clustering_trace(
-                    self.logger,
-                    "pipeline_umap_done",
-                    reduced_shape=list(reduced.shape),
-                )
-            except Exception as exc:
-                _clustering_trace(
-                    self.logger,
-                    "pipeline_umap_failed",
-                    error=str(exc),
-                    request_ids_affected=valid_ids,
-                )
-                self.logger.error(f"UMAP hatası: {exc}", exc_info=True)
-                if not is_preview:
-                    for req_id in valid_ids:
-                        record = await fr_repo.get(req_id)
-                        if record:
-                            record.status = "clustering_failed"
-                    await session.flush()
-                return {
-                    "clustered": 0,
-                    "noise": len(valid_ids),
-                    "new_labels": 0,
-                    "preview_records": [],
-                    "preview_labels": {},
-                }
+            reducer = umap.UMAP(
+                n_components=n_components_umap,
+                metric="cosine",
+                n_neighbors=n_neighbors_umap,
+                random_state=42,
+                **umap_extra,
+            )
+            reduced = reducer.fit_transform(matrix)
+            _clustering_trace(
+                self.logger,
+                "pipeline_umap_done",
+                reduced_shape=list(reduced.shape),
+            )
 
             # --- HDBSCAN kümeleme ---
             _clustering_trace(
@@ -778,33 +934,78 @@ class FeatureRequestService:
                 metric="euclidean_on_umap_space",
             )
             self.logger.info("HDBSCAN kümeleme başlatılıyor...")
-            try:
-                clusterer = hdbscan.HDBSCAN(
-                    min_cluster_size=params.min_cluster_size,
-                    min_samples=params.min_samples,
-                    metric="euclidean",
-                    prediction_data=True,
-                )
-                labels = clusterer.fit_predict(reduced)  # -1 = noise
-                uniq, counts = np.unique(labels, return_counts=True)
-                label_dist = {
-                    int(k): int(v)
-                    for k, v in zip(uniq.tolist(), counts.tolist())
+            clusterer = hdbscan.HDBSCAN(
+                min_cluster_size=params.min_cluster_size,
+                min_samples=params.min_samples,
+                metric="euclidean",
+                prediction_data=True,
+            )
+            labels = clusterer.fit_predict(reduced)  # -1 = noise
+            uniq, counts = np.unique(labels, return_counts=True)
+            label_dist = {
+                int(k): int(v) for k, v in zip(uniq.tolist(), counts.tolist())
+            }
+            _clustering_trace(
+                self.logger,
+                "pipeline_hdbscan_done",
+                label_distribution=label_dist,
+                noise_points=int(label_dist.get(-1, 0)),
+                distinct_clusters=len([k for k in label_dist if k != -1]),
+            )
+
+            # --- Groq label üretimi (session-free) ---
+            unique_clusters = set(int(lbl) for lbl in labels if lbl != -1)
+            for cid in unique_clusters:
+                if cid in existing_cluster_ids:
+                    groq_labels_detail[str(cid)] = {"source": "existing_db"}
+                    continue
+
+                cluster_indices = [i for i, lbl in enumerate(labels) if lbl == cid]
+                sample_ids = [valid_ids[i] for i in cluster_indices[:5]]
+                sample_texts = [raw_texts[sid] for sid in sample_ids]
+
+                label_text = await self._generate_cluster_label(cid, sample_texts)
+                new_cluster_labels[cid] = label_text
+                groq_labels_detail[str(cid)] = {
+                    "source": "groq_generated",
+                    "label": (label_text or "")[:400],
+                    "sample_request_ids": sample_ids,
+                    "sample_text_chars": [len(t or "") for t in sample_texts],
                 }
-                _clustering_trace(
-                    self.logger,
-                    "pipeline_hdbscan_done",
-                    label_distribution=label_dist,
-                    noise_points=int(label_dist.get(-1, 0)),
-                    distinct_clusters=len([k for k in label_dist if k != -1]),
-                )
-            except Exception as exc:
-                _clustering_trace(
-                    self.logger,
-                    "pipeline_hdbscan_failed",
-                    error=str(exc),
-                )
-                self.logger.error(f"HDBSCAN hatası: {exc}", exc_info=True)
+
+        except Exception as exc:
+            compute_error = exc
+            _clustering_trace(
+                self.logger,
+                "pipeline_compute_failed",
+                error=str(exc),
+                request_ids_affected=valid_ids,
+            )
+            self.logger.error(f"Pipeline hesaplama hatası: {exc}", exc_info=True)
+
+        # ═══════════════════════════════════════════════════════════════════
+        # SESSION 2 — Yaz (her durumda açılır: hata veya başarı)
+        # ═══════════════════════════════════════════════════════════════════
+        async with self.db.session() as session:
+            fr_repo = FeatureRequestRepository(session)
+            fcl_repo = FeatureClusterLabelRepository(session)
+
+            # Geçersiz embedding'leri işaretle (tüm yollarda)
+            if invalid_record_ids and not is_preview:
+                for rid in invalid_record_ids:
+                    r = await fr_repo.get(rid)
+                    if r:
+                        r.status = "embedding_failed"
+                await session.flush()
+
+            # Hesaplama (UMAP / HDBSCAN / Groq) başarısız olduysa hata yolu
+            if compute_error is not None:
+                if not is_preview:
+                    for rid in valid_ids:
+                        r = await fr_repo.get(rid)
+                        if r:
+                            r.status = "clustering_failed"
+                    await session.flush()
                 return {
                     "clustered": 0,
                     "noise": len(valid_ids),
@@ -813,172 +1014,160 @@ class FeatureRequestService:
                     "preview_labels": {},
                 }
 
-            # İndeks kaymasını önlemek için id'den kayda erişimi sağlayan sözlük (harita) kur
-            record_by_id = {r.id: r for r in embedded}
-
             # --- DB güncelleme ---
             clustered_count = 0
             noise_count = 0
+            noise_ids_sample: list[str] = []
+            unmatched_ids: list[str] = []
 
-            preview_records = []
-            preview_labels = {}
+            preview_records: list[_RecordSnapshot] = []
+            preview_labels: dict[int, str] = {}
+
+            member_map: defaultdict[int, list[str]] = defaultdict(list)
 
             for req_id, cluster_label in zip(valid_ids, labels):
                 if cluster_label == -1:
                     noise_count += 1
-                    # Noise kayıtlar cluster_id=NULL, status='embedded' kalır
+                    if len(noise_ids_sample) < 25:
+                        noise_ids_sample.append(req_id)
+                    if not is_preview:
+                        new_count = await fr_repo.increment_retry_count(req_id)
+                        if new_count >= 3:
+                            unmatched_ids.append(req_id)
                     continue
+                member_map[int(cluster_label)].append(req_id)
                 if not is_preview:
                     await fr_repo.update_cluster(req_id, int(cluster_label))
+                    await fr_repo.reset_retry_count(req_id)
                 else:
-                    # Sadece memory üzerinde değer atıyoruz
-                    req_obj = record_by_id[req_id]
-                    req_obj.cluster_id = int(cluster_label)
-                    preview_records.append(req_obj)
+                    preview_records.append(
+                        _RecordSnapshot(
+                            id=req_id,
+                            request_raw=raw_texts[req_id],
+                            cluster_id=int(cluster_label),
+                            fraud_score=fraud_scores[req_id],
+                            user_id=user_ids[req_id],
+                        )
+                    )
                 clustered_count += 1
 
-            noise_ids_sample = [
-                valid_ids[i]
-                for i, lb in enumerate(labels)
-                if lb == -1
-            ][:25]
-            member_map: defaultdict[int, list[str]] = defaultdict(list)
-            for rid, lb in zip(valid_ids, labels):
-                if lb != -1:
-                    member_map[int(lb)].append(rid)
-            membership_summary = {
-                str(cid): {
-                    "count": len(ids),
-                    "sample_request_ids": ids[:_CLUSTER_ID_SAMPLE_LIMIT],
-                }
-                for cid, ids in sorted(member_map.items())
-            }
-            _clustering_trace(
-                self.logger,
-                "pipeline_assignments",
-                is_preview=is_preview,
-                clustered_assigned=clustered_count,
-                noise_unassigned=noise_count,
-                noise_sample_request_ids=noise_ids_sample,
-                cluster_membership_summary=membership_summary,
-                note="noise=-1 HDBSCAN gürültü; cluster_id DB/planda atanır.",
-            )
+            # Eşleşmeyenleri reported olarak işaretle
+            if unmatched_ids and not is_preview:
+                await fr_repo.mark_reported(unmatched_ids)
 
-            # --- Yeni cluster'lar için Groq label üret ---
-            unique_clusters = set(int(lbl) for lbl in labels if lbl != -1)
-            new_labels_count = 0
-            groq_labels_detail: dict[str, Any] = {}
-
-            for cid in unique_clusters:
-                existing_label = await fcl_repo.get_by_cluster_id(cid)
-
-                # Preview modundaysa ve label zaten var ise (büyük olasılıkla olmaz çünkü resetleniyor) sadece alıp preview'a at
-                if existing_label is not None:
-                    groq_labels_detail[str(cid)] = {
-                        "source": "existing_db",
-                        "label": existing_label.label,
-                    }
-                    if is_preview:
-                        preview_labels[cid] = existing_label.label
-                    continue  # Daha önce üretilmiş, tekrar üretme
-
-                # Önceden üretilmemişse üret
-                cluster_indices = [i for i, lbl in enumerate(labels) if lbl == cid]
-                sample_valid_ids = [
-                    valid_ids[i] for i in cluster_indices[:5]
-                ]  # geçerli valid_ids'den çekiyoruz
-                sample_records = [record_by_id[req_id] for req_id in sample_valid_ids]
-                sample_texts = [r.request_raw for r in sample_records]
-
-                label_text = await self._generate_cluster_label(cid, sample_texts)
-
-                groq_labels_detail[str(cid)] = {
-                    "source": "groq_generated",
-                    "label": (label_text or "")[:400],
-                    "sample_request_ids": sample_valid_ids,
-                    "sample_text_chars": [len(t or "") for t in sample_texts],
-                }
-
+            # Yeni cluster etiketlerini kaydet
+            for cid, label_text in new_cluster_labels.items():
                 if not is_preview:
                     new_label = FeatureClusterLabel(
                         cluster_id=cid,
                         label=label_text,
-                        generated_at=datetime.utcnow(),
+                        generated_at=datetime.now(timezone.utc),
                         report_count=0,
                     )
                     session.add(new_label)
-                    await session.flush()
                 else:
                     preview_labels[cid] = label_text
 
-                new_labels_count += 1
+            await session.flush()
 
-            _clustering_trace(
-                self.logger,
-                "pipeline_groq_labels",
-                is_preview=is_preview,
-                clusters=groq_labels_detail,
-            )
+        # ═══════════════════════════════════════════════════════════════════
+        # SESSION 2 KAPANDI — Loglama ve dönüş
+        # ═══════════════════════════════════════════════════════════════════
 
-            self.logger.info(
-                "Clustering pipeline tamamlandı.",
-                extra={
-                    "clustered": clustered_count,
-                    "noise": noise_count,
-                    "new_labels": new_labels_count,
-                },
-            )
-
-            # --- Kalibrasyon logu ---
-            sil_score = None
-            unique_cluster_list = list(set(int(lbl) for lbl in labels if lbl != -1))
-            try:
-                if len(unique_cluster_list) >= 2:
-                    from sklearn.metrics import silhouette_score
-
-                    sil_score = round(float(silhouette_score(reduced, labels)), 4)
-            except Exception:
-                pass
-
-            cluster_sizes = sorted(
-                [int(np.sum(labels == cid)) for cid in unique_cluster_list],
-                reverse=True,
-            )
-
-            clustering_log = {
-                "phase": "clustering_run_summary",
-                "run_date": datetime.now(timezone.utc).isoformat(),
-                "is_preview": is_preview,
-                "n_sentences": len(vectors),
-                "min_cluster_size": params.min_cluster_size,
-                "min_samples": params.min_samples,
-                "n_components_requested": params.n_components,
-                "n_neighbors_requested": params.n_neighbors,
-                "umap_effective_n_components": n_components_umap,
-                "umap_effective_n_neighbors": n_neighbors_umap,
-                "umap_init": str(umap_extra.get("init", "default")),
-                "n_clusters_found": len(unique_cluster_list),
-                "noise_ratio": round(noise_count / len(vectors), 4) if vectors else 0.0,
-                "silhouette_score": sil_score,
-                "cluster_sizes": cluster_sizes,
-                "param_source": "fixed" if FIXED_CLUSTERING_PARAMS else "dynamic",
-                "cluster_membership_summary": membership_summary,
-                "noise_sample_request_ids": noise_ids_sample,
-                "groq_labels_by_cluster": groq_labels_detail,
+        membership_summary = {
+            str(cid): {
+                "count": len(ids),
+                "sample_request_ids": ids[:_CLUSTER_ID_SAMPLE_LIMIT],
             }
-            self.logger.info(
-                "clustering_run",
-                extra={"clustering": clustering_log},
-            )
-
-            return {
+            for cid, ids in sorted(member_map.items())
+        }
+        _clustering_trace(
+            self.logger,
+            "pipeline_assignments",
+            is_preview=is_preview,
+            clustered_assigned=clustered_count,
+            noise_unassigned=noise_count,
+            noise_sample_request_ids=noise_ids_sample,
+            cluster_membership_summary=membership_summary,
+            note="noise=-1 HDBSCAN gürültü; cluster_id DB/planda atanır.",
+        )
+        _clustering_trace(
+            self.logger,
+            "pipeline_groq_labels",
+            is_preview=is_preview,
+            clusters=groq_labels_detail,
+        )
+        self.logger.info(
+            "Clustering pipeline tamamlandı.",
+            extra={
                 "clustered": clustered_count,
                 "noise": noise_count,
-                "new_labels": new_labels_count,
-                "clustering_log": clustering_log,
-                "preview_records": preview_records if is_preview else [],
-                "preview_labels": preview_labels if is_preview else {},
-            }
+                "new_labels": len(new_cluster_labels),
+            },
+        )
+
+        # --- Kalibrasyon logu ---
+        sil_score = None
+        unique_cluster_list = list(set(int(lbl) for lbl in labels if lbl != -1))
+        try:
+            if len(unique_cluster_list) >= 2:
+                from sklearn.metrics import silhouette_score
+
+                sil_score = round(float(silhouette_score(reduced, labels)), 4)
+        except Exception:
+            pass
+
+        cluster_sizes = sorted(
+            [int(np.sum(labels == cid)) for cid in unique_cluster_list],
+            reverse=True,
+        )
+
+        clustering_log = {
+            "phase": "clustering_run_summary",
+            "run_date": datetime.now(timezone.utc).isoformat(),
+            "is_preview": is_preview,
+            "n_sentences": len(vectors),
+            "min_cluster_size": params.min_cluster_size,
+            "min_samples": params.min_samples,
+            "n_components_requested": params.n_components,
+            "n_neighbors_requested": params.n_neighbors,
+            "umap_effective_n_components": n_components_umap,
+            "umap_effective_n_neighbors": n_neighbors_umap,
+            "umap_init": str(umap_extra.get("init", "default")),
+            "n_clusters_found": len(unique_cluster_list),
+            "noise_ratio": round(noise_count / len(vectors), 4) if vectors else 0.0,
+            "silhouette_score": sil_score,
+            "cluster_sizes": cluster_sizes,
+            "param_source": "fixed" if FIXED_CLUSTERING_PARAMS else "dynamic",
+            "cluster_membership_summary": membership_summary,
+            "noise_sample_request_ids": noise_ids_sample,
+            "groq_labels_by_cluster": groq_labels_detail,
+        }
+        self.logger.info(
+            "clustering_run",
+            extra={"clustering": clustering_log},
+        )
+
+        unmatched_snapshots = [
+            _RecordSnapshot(
+                id=rid,
+                request_raw=raw_texts[rid],
+                fraud_score=fraud_scores[rid],
+                user_id=user_ids[rid],
+            )
+            for rid in unmatched_ids
+        ]
+
+        return {
+            "pipeline_type": "hdbscan",
+            "clustered": clustered_count,
+            "noise": noise_count,
+            "new_labels": len(new_cluster_labels),
+            "unmatched_records": unmatched_snapshots,
+            "clustering_log": clustering_log,
+            "preview_records": preview_records if is_preview else [],
+            "preview_labels": preview_labels if is_preview else {},
+        }
 
     async def _generate_cluster_label(
         self, cluster_id: int, sample_texts: list[str]
@@ -1037,24 +1226,83 @@ class FeatureRequestService:
 
     async def generate_admin_report(
         self,
+        pipeline_result: dict | None = None,
         pipeline_stats: dict | None = None,
         is_preview: bool = False,
         preview_data: dict | None = None,
     ) -> str:
         """
-        status='clustered' olan kayıtlardan yapısı sabit bir Türkçe yönetici raporu üretir.
+        run_clustering_pipeline() sonucuna göre yapısı sabit bir Türkçe yönetici raporu üretir.
 
-        Rapor yapısı Python f-string şablonuyla kurulur; LLM yalnızca
-        top-3 cluster için 1-2 cümlelik açıklama üretmek üzere çağrılır.
-        Böylece her çalıştırmada aynı yapı garantilenir.
+        pipeline_result içindeki "pipeline_type" anahtarına göre üç farklı rapor formatı seçilir:
+          - "direct_list"          : ≤ DIRECT_DUMP_MAX_RECORDS — kayıtlar direkt listelenir.
+          - "agglomerative_preview": 6-19 kayıt — ön izleme kümeleri + hafta notu.
+          - "hdbscan"              : ≥ HDBSCAN_MIN_RECORDS — mevcut format + Eşleşmeyenler bölümü.
 
         Args:
-            pipeline_stats: run_clustering_pipeline()'ın döndürdüğü clustering_log dict'i.
-                            None geçilirse istatistikler mevcut DB verisiyle hesaplanır.
+            pipeline_result: run_clustering_pipeline()'ın döndürdüğü sözlük.
+            pipeline_stats:  clustering_log dict'i (istatistikler için).
 
         Returns:
             Sabit yapılı Türkçe rapor metni (str).
         """
+        pipeline_type = (pipeline_result or {}).get("pipeline_type", "hdbscan")
+
+        # ── Yol 1: Direkt Listeleme (≤ DIRECT_DUMP_MAX_RECORDS) ─────────────
+        if pipeline_type == "direct_list":
+            direct_records = (pipeline_result or {}).get("direct_records", [])
+            if not direct_records:
+                return "Bu hafta raporlanacak özellik talebi bulunamadı."
+            lines = [f"• {r.request_raw[:150]}" for r in direct_records]
+            report = (
+                f"📊 *Haftalık Özellik Talebi Raporu*\n\n"
+                f"📥 Bu hafta alınan istek sayısı: *{len(direct_records)}*\n"
+                f"ℹ️ Veri miktarı kümeleme için yetersiz — kayıtlar doğrudan listeleniyor:\n\n"
+                + "\n".join(lines)
+            )
+            self.logger.info(
+                "Admin raporu (direkt liste) oluşturuldu.",
+                extra={"record_count": len(direct_records)},
+            )
+            return report
+
+        # ── Yol 2: Agglomerative Ön İzleme (6-19 kayıt) ────────────────────
+        if pipeline_type == "agglomerative_preview":
+            pr_records = (pipeline_result or {}).get("preview_records", [])
+            pr_labels = (pipeline_result or {}).get("preview_labels", {})
+            total_n = (pipeline_result or {}).get("clustered", 0) + (
+                pipeline_result or {}
+            ).get("noise", 0)
+
+            clusters_agg: dict[int, list] = {}
+            for rec in pr_records:
+                if rec.cluster_id is not None:
+                    clusters_agg.setdefault(rec.cluster_id, []).append(rec)
+
+            sorted_agg = sorted(
+                clusters_agg.items(), key=lambda x: len(x[1]), reverse=True
+            )
+            medals = ["🥇", "🥈", "🥉"]
+            agg_lines: list[str] = []
+            for i, (cid, recs) in enumerate(sorted_agg[:3]):
+                lbl = pr_labels.get(cid, f"Grup #{cid}")
+                medal = medals[i] if i < 3 else "•"
+                agg_lines.append(f"{medal} *{lbl}* — {len(recs)} talep")
+
+            report = (
+                f"📊 *Haftalık Özellik Talebi Raporu*\n\n"
+                f"📥 Bu hafta alınan istek sayısı: *{total_n}*\n"
+                f"🗂️ Ön izleme küme sayısı: *{len(clusters_agg)}*\n\n"
+                + ("\n".join(agg_lines) if agg_lines else "_Küme oluşturulamadı._")
+                + "\n\n⚠️ _[Ön İzleme] Yeterli veri biriktiğinde HDBSCAN ile yeniden kümelenecek._"
+            )
+            self.logger.info(
+                "Admin raporu (agglomerative ön izleme) oluşturuldu.",
+                extra={"cluster_count": len(clusters_agg), "total_n": total_n},
+            )
+            return report
+
+        # ── Yol 3: HDBSCAN (≥ HDBSCAN_MIN_RECORDS) ─────────────────────────
         async with self.db.session() as session:
             fr_repo = FeatureRequestRepository(session)
             fcl_repo = FeatureClusterLabelRepository(session)
@@ -1069,31 +1317,28 @@ class FeatureRequestService:
             if not clustered:
                 return "Bu hafta kümelenmiş özellik talebi bulunamadı."
 
-            # ── Cluster bazında gruplama ──────────────────────────────────────
+            # ── Cluster bazında gruplama ──────────────────────────────────
             clusters: dict[int, list] = {}
             for record in clustered:
                 if record.cluster_id is None:
                     continue
                 clusters.setdefault(record.cluster_id, []).append(record)
 
-            # ── İstatistikler (tamamen kodda, LLM yok) ───────────────────────
+            # ── İstatistikler ─────────────────────────────────────────────
             total_clustered = len(clustered)
             total_clusters = len(clusters)
 
             if pipeline_stats:
-                # run_clustering_pipeline'dan gelen clustering_log
                 total_embedded = pipeline_stats.get("n_sentences", total_clustered)
-                # "Bu hafta alınan" = embedded + noise (pipeline'a giren toplam)
                 noise = pipeline_stats.get("noise_ratio", 0)
                 total_requests = (
                     int(total_embedded / (1 - noise)) if noise < 1 else total_embedded
                 )
             else:
-                # Fallback: sadece clustered kayıtlardan hesapla
                 total_embedded = total_clustered
                 total_requests = total_clustered
 
-            # ── Top 3 cluster (büyükten küçüğe) ─────────────────────────────
+            # ── Top 3 cluster (büyükten küçüğe) ──────────────────────────
             sorted_clusters = sorted(
                 clusters.items(), key=lambda x: len(x[1]), reverse=True
             )
@@ -1119,9 +1364,7 @@ class FeatureRequestService:
                 desc = await self._describe_cluster(cid, label, sample_texts)
 
                 fraud_flagged = [
-                    r
-                    for r in records
-                    if r.fraud_score and r.fraud_score > fraud_thresh
+                    r for r in records if r.fraud_score and r.fraud_score > fraud_thresh
                 ]
                 fraud_note = (
                     f"\n   ⚠️ {len(fraud_flagged)} fraud şüpheli kayıt."
@@ -1134,7 +1377,7 @@ class FeatureRequestService:
                     f"   {desc}"
                 )
 
-            # ── Raporlama işlemleri ──────────────────────────────────────────
+            # ── Raporlama işlemleri ───────────────────────────────────────
             if not is_preview:
                 reported_ids: list[str] = []
                 for cid, records in clusters.items():
@@ -1147,7 +1390,7 @@ class FeatureRequestService:
                 if reported_ids:
                     await fr_repo.mark_reported(reported_ids)
 
-            # ── Sabit şablon — yapı asla değişmez ───────────────────────────
+            # ── Sabit şablon ──────────────────────────────────────────────
             report = (
                 f"📊 *Haftalık Özellik Talebi Raporu*\n\n"
                 f"📥 Bu hafta alınan istek sayısı: *{total_requests}*\n"
@@ -1157,11 +1400,21 @@ class FeatureRequestService:
                 + "\n\n".join(top3_lines)
             )
 
+            # ── Eşleşmeyenler bölümü ─────────────────────────────────────
+            unmatched = (pipeline_result or {}).get("unmatched_records", [])
+            if unmatched:
+                um_lines = [f"• {r.request_raw[:150]}" for r in unmatched]
+                report += (
+                    "\n\n📌 *Eşleşmeyenler* _(3+ haftadır kümeye atanamayan talepler)_\n"
+                    + "\n".join(um_lines)
+                )
+
             self.logger.info(
                 "Admin raporu oluşturuldu.",
                 extra={
                     "total_requests": total_requests,
                     "total_clusters": total_clusters,
+                    "unmatched_count": len(unmatched),
                 },
             )
             return report
@@ -1208,7 +1461,7 @@ class FeatureRequestService:
             self.logger.error(f"Admin bildirim hatası: {exc}", exc_info=True)
 
     async def send_weekly_report(self) -> None:
-        """Clustering pipeline'ı çalıştırır, rapor üretir ve adminlere DM atar."""
+        """Clustering pipeline'ı çalıştırır, rapor üretir, adminlere gönderir ve DB'yi temizler."""
         from packages.settings import get_settings
         from packages.slack.blocks.layouts import Layouts
         from packages.slack.client import slack_client
@@ -1216,7 +1469,8 @@ class FeatureRequestService:
         try:
             cr = await self.run_clustering_pipeline()
             report_text = await self.generate_admin_report(
-                pipeline_stats=cr.get("clustering_log") if cr else None
+                pipeline_result=cr,
+                pipeline_stats=cr.get("clustering_log") if cr else None,
             )
             blocks = Layouts.feature_request_report(report_text)
 
@@ -1232,6 +1486,21 @@ class FeatureRequestService:
                 )
 
             self.logger.info("Haftalık rapor adminlere iletildi.")
+
+            # ── Rapor başarıyla gönderildikten sonra temizlik ────────────
+            # Önceki haftanın reported kayıtları ve onlara ait cluster etiketleri artık güvenle silinebilir.
+            async with self.db.session() as session:
+                fr_repo = FeatureRequestRepository(session)
+                fcl_repo = FeatureClusterLabelRepository(session)
+
+                deleted_reqs = await fr_repo.delete_reported()
+                deleted_labels = await fcl_repo.delete_labels()
+
+                if deleted_reqs or deleted_labels:
+                    self.logger.info(
+                        f"Haftalık temizlik: {deleted_reqs} reported kayıt ve {deleted_labels} cluster etiketi silindi."
+                    )
+
         except Exception as exc:
             self.logger.error(
                 f"Haftalık rapor gönderimi başarısız: {exc}", exc_info=True
@@ -1276,6 +1545,30 @@ class FeatureRequestService:
                 self.logger.debug(
                     "Garbage collection: Silinecek bekleyen taslak bulunamadı."
                 )
+
+    async def retry_clustering_failed(self) -> None:
+        """
+        status='clustering_failed' olan kayıtları bulup status'larını 'embedded' olarak sıfırlar;
+        böylece bir sonraki haftalık pipeline çalıştırmasında yeniden kümeleme denenir.
+
+        Kayıt sayısı loglanır; başarı durumunda herhangi bir bildirim gönderilmez.
+        Eğer kayıt yok ise sessizce çıkar.
+        """
+        async with self.db.session() as session:
+            repo = FeatureRequestRepository(session)
+            failed_records = await repo.list_by_status("clustering_failed")
+            if not failed_records:
+                self.logger.debug("retry_clustering_failed: Yeniden denenecek kayıt yok.")
+                return
+
+            for record in failed_records:
+                record.status = "embedded"
+                record.retry_count = (record.retry_count or 0) + 1
+
+            await session.flush()
+            self.logger.info(
+                f"Clustering retry: {len(failed_records)} kayıt 'embedded' statüsüne alındı."
+            )
 
     async def check_clustering_failed(self) -> None:
         """status='clustering_failed' olan kayıtları kontrol eder ve hâlâ varsa uyarı gönderir."""
