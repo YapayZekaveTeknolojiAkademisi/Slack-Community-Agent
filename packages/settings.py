@@ -68,6 +68,15 @@ class SystemSettings(BaseSettings):
         ge=1,
         validation_alias=AliasChoices("MONITOR_EVALUATION_INTERVAL", "monitor_evaluation_interval"),
     )
+    pending_challenge_ttl_minutes: int = Field(
+        30,
+        ge=1,
+        validation_alias=AliasChoices(
+            "PENDING_CHALLENGE_TTL_MINUTES",
+            "pending_challenge_ttl_minutes",
+        ),
+        description="Takım kurulumu beklemede kalan geçici challenge kayıtlarının dakika cinsinden ömrü (ChallengeMonitor)",
+    )
 
     evaluation_max_wait_hours: int = Field(
         24,

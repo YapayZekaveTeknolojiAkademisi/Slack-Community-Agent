@@ -14,14 +14,6 @@ from .evaluation import handle_evaluate
 app: App = slack_client.app
 settings = get_settings()
 
-def validate_challenge_channel(body: dict, next):
-    """Komutun sadece yetkili kanalda çalışmasını sağlayan middleware."""
-    channel_id = body.get("channel_id")
-    if channel_id != settings.slack_challenge_channel:
-        # Mesajı sadece kullanıcıya gönder (ephemeral)
-        # Not: Bolt middleware içinde respond() doğrudan gelmezse ack() ile mesaj dönebiliriz.
-        return # İşleme devam etme
-    next()
 
 @app.command("/challenge")
 def handle_challenge_command(ack: Ack, body: dict, client, command):

@@ -156,7 +156,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--fresh",
         action="store_true",
-        help="Başlatmadan önce challenge/jury/submission tablolarını temizle (FRESH mod)",
+        help="Başlatmadan önce tüm challenge kayıtlarını temizle (takım/jüri ilişkileri; FRESH mod)",
     )
     args = parser.parse_args()
     main(mode=StartupMode.FRESH if args.fresh else StartupMode.RESUME)
