@@ -1,9 +1,3 @@
-"""
-This Month Service — Eğitim verisi çekme ve filtreleme.
-
-Google Sheets'ten aylık eğitim takvimini CSV olarak çeker,
-parse eder ve bölüm/ay bazında filtreler.
-"""
 from __future__ import annotations
 
 import csv
@@ -17,10 +11,6 @@ from ..logger import _logger
 
 
 def detect_department(title: str) -> Optional[str]:
-    """
-    Slack profil title'ından bölüm kodunu (YZ / VB / NC/LC) tespit eder.
-    Büyük-küçük harf duyarsız eşleştirme yapar.
-    """
     if not title:
         return None
     title_lower = title.lower().strip()
@@ -32,10 +22,6 @@ def detect_department(title: str) -> Optional[str]:
 
 
 def fetch_monthly_trainings() -> list[dict]:
-    """
-    Google Sheets'ten aylık eğitim verilerini CSV olarak çeker ve parse eder.
-    Her satır: { "ay": str, "egitim": str, "durum": str, "bolumler": list[str] }
-    """
     try:
         with urlopen(MONTHLY_CSV_URL, timeout=15) as resp:
             raw = resp.read().decode("utf-8")
@@ -49,11 +35,10 @@ def fetch_monthly_trainings() -> list[dict]:
     if not rows:
         return []
 
-    # İlk satır başlık: Aylar, Eğitimler, Bitirme Durumu, Sorumlu Bölüm
     trainings: list[dict] = []
     current_month = ""
 
-    for row in rows[1:]:  # başlık satırını atla
+    for row in rows[1:]: 
         if len(row) < 4:
             continue
 
@@ -62,14 +47,12 @@ def fetch_monthly_trainings() -> list[dict]:
         status = row[2].strip()
         departments_raw = row[3].strip()
 
-        # Ay hücresi sadece ilk satırda dolu, sonrakiler boş
         if month_cell:
             current_month = month_cell
 
         if not training:
             continue
 
-        # Bölümleri parse et (virgülle ayrılmış)
         dept_list = [d.strip() for d in departments_raw.split(",") if d.strip()]
 
         trainings.append({
@@ -87,12 +70,10 @@ def filter_trainings(
     month_name: str,
     department_code: str,
 ) -> list[dict]:
-    """Belirtilen ay ve bölüm koduna göre eğitimleri filtreler."""
     results = []
     for t in trainings:
         if t["ay"] != month_name:
             continue
-        # Bölüm eşleşmesi: spreadsheet'te "YZ", "VB", "NC/LC" kullanılıyor
         if department_code in t["bolumler"]:
             results.append(t)
     return results

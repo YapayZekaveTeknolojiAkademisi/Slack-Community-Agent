@@ -1,26 +1,13 @@
-"""
-This Month Service — Sabitler ve yapılandırma değerleri.
-
-Google Sheets bağlantı bilgileri, Türkçe ay adları,
-bölüm takma adları ve görüntüleme isimleri burada tanımlanır.
-"""
 from __future__ import annotations
 
-# ---------------------------------------------------------------------------
-# Google Sheets CSV export URL'leri
-# ---------------------------------------------------------------------------
 SPREADSHEET_ID = "1KKMmLwHSkRlhhCh_PmqhLbooBCRiB2Xb43o7FcCZrM8"
 
-# gid=894647740 → "Eğitim Tarihleri (Aylık)" sayfası
 MONTHLY_SHEET_GID = "894647740"
 MONTHLY_CSV_URL = (
     f"https://docs.google.com/spreadsheets/d/{SPREADSHEET_ID}"
     f"/export?format=csv&gid={MONTHLY_SHEET_GID}"
 )
 
-# ---------------------------------------------------------------------------
-# Ay → Türkçe ay adı eşleşmesi (spreadsheet'teki değerlerle uyumlu)
-# ---------------------------------------------------------------------------
 MONTH_NAMES_TR: dict[int, str] = {
     1: "Ocak",
     2: "Şubat",
@@ -36,10 +23,6 @@ MONTH_NAMES_TR: dict[int, str] = {
     12: "Aralık",
 }
 
-# ---------------------------------------------------------------------------
-# Bölüm kodu → Slack profil title'daki olası eşleşmeler
-# Spreadsheet sütununda virgülle ayrılmış: "YZ, VB, NC/LC"
-# ---------------------------------------------------------------------------
 DEPARTMENT_ALIASES: dict[str, list[str]] = {
     "YZ": ["yapay zeka", "yapay zekâ", "yz", "ai", "artificial intelligence"],
     "VB": ["veri bilimi", "vb", "data science", "ds", "veri"],
@@ -49,9 +32,6 @@ DEPARTMENT_ALIASES: dict[str, list[str]] = {
     ],
 }
 
-# ---------------------------------------------------------------------------
-# Bölüm kodu → okunabilir görüntüleme ismi (emoji ile)
-# ---------------------------------------------------------------------------
 DEPT_DISPLAY_NAMES: dict[str, str] = {
     "YZ": "🤖 Yapay Zeka",
     "VB": "📊 Veri Bilimi",
