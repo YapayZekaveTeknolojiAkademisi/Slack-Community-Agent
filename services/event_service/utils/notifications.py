@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from packages.settings import get_settings
+from packages.slack.admin_status import ADMIN_STATUS_DIVIDER
 from packages.slack.client import slack_client
 from packages.slack.blocks.builder import MessageBuilder
 from packages.database.models.event import Event, LocationType
@@ -336,3 +337,67 @@ def update_admin_request_message(
             _logger.info("[EVT-NOTIFY] Admin talep mesajı güncellendi event=%s ts=%s", event.id, ts)
     except Exception as e:
         _logger.error("[EVT-NOTIFY] Admin talebi güncellenemedi event=%s: %s", event.id, e)
+
+
+def notify_event_service_startup(*, socket_bound: bool) -> None:
+    """
+    Event servisi ayakta — admin kanalına okunaklı başlangıç özeti.
+    compose'ta çoğunlukla socket_bound=False (scheduler-only).
+    """
+    s = get_settings()
+    admin_channel = (s.slack_admin_channel or "").strip()
+    if not admin_channel:
+        _logger.warning("[NOTIFY] SLACK_ADMIN_CHANNEL bos; event startup admin post atlaniyor")
+        return
+
+    if socket_bound:
+        socket_line = (
+            "• *Socket Mode* bu süreçte *açık*; Slack üzerinden bağlı ve istek dinleniyor.\n"
+            "• Slash komutları bu event konteynerinden yanıtlanıyorsa bu mod aktiftir."
+        )
+    else:
+        socket_line = (
+            "• *Socket Mode* bu süreçte *kapalı*; zamanlayıcı ve arka plan görevleri çalışıyor.\n"
+            "• Slash komutları ana *challenge* sürecindeki socket üzerinden işlenir (Compose varsayılanı)."
+        )
+
+    text = (
+        f"{ADMIN_STATUS_DIVIDER}\n"
+        "*Event (etkinlik) servisi* — başlatıldı\n"
+        f"{ADMIN_STATUS_DIVIDER}\n"
+        "• Veritabanı bağlantı havuzu kullanılabilir.\n"
+        "• Periyodik zamanlayıcı *çalışıyor* (~60 sn): zaman aşımı, sabah duyurusu, 10 dk öncesi hatırlatma, "
+        "tamamlanmış etkinlik geçişleri.\n"
+        f"{socket_line}"
+    )
+    try:
+        slack_client.bot_client.chat_postMessage(channel=admin_channel, text=text)
+        _logger.info("[NOTIFY] event service startup admin post sent")
+    except Exception as exc:
+        _logger.warning("[NOTIFY] event startup admin post failed: %s", exc)
+
+
+def notify_event_service_shutdown(*, socket_bound: bool) -> None:
+    """Event süreci dururken admin kanalına kısa kapanış bildirimi."""
+    s = get_settings()
+    admin_channel = (s.slack_admin_channel or "").strip()
+    if not admin_channel:
+        return
+
+    sock_note = (
+        "• Bu süreçte açık olan Socket kapatılıyor."
+        if socket_bound
+        else "• Bu süreçte Socket kullanılmıyordu (yalnızca zamanlayıcı / arka plan)."
+    )
+    sd_text = (
+        f"{ADMIN_STATUS_DIVIDER}\n"
+        "*Event (etkinlik) servisi* — kapatılıyor / durduruldu\n"
+        f"{ADMIN_STATUS_DIVIDER}\n"
+        "• Periyodik zamanlayıcı iptal edilip süreç sonlandırılıyor; Postgres oturumu kapatılıyor.\n"
+        f"{sock_note}"
+    )
+    try:
+        slack_client.bot_client.chat_postMessage(channel=admin_channel, text=sd_text)
+        _logger.info("[NOTIFY] event service shutdown admin post sent")
+    except Exception as exc:
+        _logger.warning("[NOTIFY] event shutdown admin post failed: %s", exc)

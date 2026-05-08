@@ -18,6 +18,7 @@ from __future__ import annotations
 import sys
 import threading
 
+from packages.slack.admin_status import post_admin_status
 from packages.slack.client import slack_client
 from packages.slack.socket_runtime import (
     close_socket_mode_safe,
@@ -41,14 +42,29 @@ def main() -> None:
 
     _logger.info("%s Phase 1/2: Slack command/message handlers registered", _SERVICE)
 
+    socket_connected = False
     try:
         connect_socket_mode(slack_client.socket_handler, _logger, _SERVICE)
+        post_admin_status(
+            "İngilizce pratik servisi başarıyla başlatıldı.",
+            detail_lines=(
+                "Socket Mode bağlı; İngilizce komut ve mesaj işleyicileri dinleniyor.",
+            ),
+            log=_logger,
+        )
+        socket_connected = True
         _logger.info("%s Phase 2/2: Running — send SIGINT or SIGTERM to stop", _SERVICE)
         stop.wait()
     except Exception as exc:
         _logger.critical("%s Socket Mode failed: %s", _SERVICE, exc, exc_info=True)
         sys.exit(1)
     finally:
+        if socket_connected:
+            post_admin_status(
+                "İngilizce pratik servisi durduruluyor.",
+                detail_lines=("Slack bağlantısı kapatılıyor.",),
+                log=_logger,
+            )
         close_socket_mode_safe(slack_client.socket_handler, _logger, _SERVICE)
         _logger.info("%s Exited cleanly", _SERVICE)
 
