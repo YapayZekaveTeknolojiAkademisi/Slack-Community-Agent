@@ -18,9 +18,11 @@
 #   HOSTINGER_BRANCH        Varsayılan main
 #   HOSTINGER_DOCKER        Varsayılan "docker"; gerekirse "sudo docker" yazın
 #
-# Disk: Her deploy `docker compose up -d --build` yeni katman üretir. Başarılı ayağa kalkıştan sonra
-# `image prune` + `builder prune` çalışır (dangling imaj + kullanılmayan build önbelleği). Named volume
-# (pgdata, hf_cache) ve çalışan konteynerlere dokunulmaz; `--all` imaj temizliği yapılmaz.
+# Disk: `docker compose up -d --build` sonrası temizlik:
+# - image prune -f: yalnızca dangling (<none>) imajlar. Hepsi taglı/aktifse "0B" normaldir (`system df` Images satırı).
+# - builder prune -af: BuildKit iç önbelleğinin tamamı (~10–30 GB sık rastlanır); çalışan imajları silmez, bir sonraki
+#   build daha uzun sürebilir. Volume'lara dokunulmaz. Etiketli ama kullanılmayan imajlar için ayrıca `image prune -a` gerekir.
+# - container prune -f: durdurulmuş konteyner artıkları.
 
 name: Deploy to Hostinger
 
@@ -97,9 +99,12 @@ jobs:
             if [ -z "${DC}" ]; then DC=docker; fi
             ${DC} compose -f docker-compose.yml up -d --build
 
-            # Güvenli disk hygiene: volume / çalışan stack korunur; eski <none> imajlar ve BuildKit önbelleği silinir.
-            echo "=== Güvenli Docker temizlik (dangling imaj + builder önbelleği) ==="
+            # image prune çoğunlukla 0B (tüm imajlar active). Build cache için builder/buildx prune -af.
+            echo "=== Docker temizlik: dangling imaj | durdurulmuş konteyner | kullanılmayan build cache (tam) ==="
             ${DC} image prune -f || true
-            ${DC} builder prune -f || true
+            ${DC} container prune -f || true
+            ${DC} builder prune -af || true
+            ${DC} buildx prune -af || true
+
             echo "=== docker system df ==="
             ${DC} system df || true
