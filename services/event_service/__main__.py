@@ -34,6 +34,10 @@ from packages.slack.community_help import setup_community_help_command
 setup_community_help_command()
 from services.event_service.core.event_loop import set_loop
 from services.event_service.core.scheduler import event_scheduler
+from services.event_service.utils.notifications import (
+    notify_event_service_shutdown,
+    notify_event_service_startup,
+)
 
 
 _SERVICE = "[Event Service]"
@@ -154,6 +158,7 @@ def main(use_socket: bool = False) -> None:
                 "%s Phase 4/5: No Socket Mode in this process (scheduler + handler imports only)",
                 _SERVICE,
             )
+        notify_event_service_startup(socket_bound=use_socket)
         _logger.info("%s Phase 5/5: Running — send SIGINT or SIGTERM to stop", _SERVICE)
         stop.wait()
     except Exception as exc:
@@ -161,6 +166,10 @@ def main(use_socket: bool = False) -> None:
         exit_code = 1
     finally:
         _logger.info("%s Shutting down...", _SERVICE)
+        try:
+            notify_event_service_shutdown(socket_bound=use_socket)
+        except Exception as exc:
+            _logger.warning("%s Shutdown admin notify failed: %s", _SERVICE, exc)
         _finalize(loop, loop_thread, shutdown_ref, close_socket=use_socket)
 
     sys.exit(exit_code)

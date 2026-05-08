@@ -17,6 +17,10 @@
 #   HOSTINGER_SSH_PORT      Varsayılan 22
 #   HOSTINGER_BRANCH        Varsayılan main
 #   HOSTINGER_DOCKER        Varsayılan "docker"; gerekirse "sudo docker" yazın
+#
+# Disk: Her deploy `docker compose up -d --build` yeni katman üretir. Başarılı ayağa kalkıştan sonra
+# `image prune` + `builder prune` çalışır (dangling imaj + kullanılmayan build önbelleği). Named volume
+# (pgdata, hf_cache) ve çalışan konteynerlere dokunulmaz; `--all` imaj temizliği yapılmaz.
 
 name: Deploy to Hostinger
 
@@ -92,3 +96,10 @@ jobs:
             DC="${{ secrets.HOSTINGER_DOCKER }}"
             if [ -z "${DC}" ]; then DC=docker; fi
             ${DC} compose -f docker-compose.yml up -d --build
+
+            # Güvenli disk hygiene: volume / çalışan stack korunur; eski <none> imajlar ve BuildKit önbelleği silinir.
+            echo "=== Güvenli Docker temizlik (dangling imaj + builder önbelleği) ==="
+            ${DC} image prune -f || true
+            ${DC} builder prune -f || true
+            echo "=== docker system df ==="
+            ${DC} system df || true

@@ -1,7 +1,9 @@
 """
 Challenge servisi bildirimleri — admin vs topluluk ayrımı.
 
-Admin kanalı (`SLACK_ADMIN_CHANNEL`): emoji yok, kısa etiket + kısaltmalar (CHG önekli).
+Admin kanalı (`SLACK_ADMIN_CHANNEL`): servis başlangıç/kapanışta okunaklı Türkçe özet; challenge çekirdeği
+ve aynı süreçteki özet / İngilizce / özellik talebi modülleri ayrı Slack mesajları olarak gider.
+diğer olaylar (challenge launch vb.) kısaltmalı `[CHG]` satırları kullanabilir.
 Diğer kanallar (challenge özel kanal, ortak/komut kanalı vb.): emoji ve uzun metin kullanılabilir.
 
 Mesaj önekleri: `packages.slack.service_prefixes` üç harflik kod (CHG).
@@ -13,6 +15,7 @@ Kanal türüne göre token seçimi:
 from __future__ import annotations
 
 from packages.settings import get_settings
+from packages.slack.admin_status import ADMIN_STATUS_DIVIDER, post_admin_status
 from packages.slack.blocks.builder import MessageBuilder
 from packages.slack.service_prefixes import PREFIX_CHALLENGE, fmt as svc_fmt
 
@@ -36,6 +39,104 @@ def _admin_chg(tag: str, detail: str) -> str:
     cleaned = " ".join((detail or "").split())
     return f"[CHG] {tag}| {cleaned}"
 
+def _admin_challenge_startup_text(*, challenge_channels: int, evaluation_channels: int) -> str:
+    """Yalnızca challenge çekirdeği — gömülü modüller ayrı Slack mesajı ile bildirilir."""
+    return (
+        f"{ADMIN_STATUS_DIVIDER}\n"
+        "*Challenge çekirdeği* — başlatıldı\n"
+        f"{ADMIN_STATUS_DIVIDER}\n"
+        "• Bellek kayıtları ve kuyruk durumu yüklendi.\n"
+        f"• Açık özel challenge kanalı sayısı: *{challenge_channels}*\n"
+        f"• Açık değerlendirme kanalı sayısı: *{evaluation_channels}*\n"
+        "• Slack *Socket Mode* bu konteynerde dinleniyor; süre izleme ve değerlendirme monitörleri çalışıyor.\n"
+        "• Topluluğa `/challenge join`, `/challenge help` vb. hatırlatıldı."
+    )
+
+
+def _admin_challenge_shutdown_text(
+    *,
+    challenge_channels: int,
+    evaluation_channels: int,
+    queue_waiting: int,
+) -> str:
+    """Challenge çekirdeği kapanırken — gömülü modüller için ayrı admin mesajları kullanılır."""
+    return (
+        f"{ADMIN_STATUS_DIVIDER}\n"
+        "*Challenge çekirdeği* — kapatılıyor / durduruldu\n"
+        f"{ADMIN_STATUS_DIVIDER}\n"
+        "• Aktif süreçler için kanallara kısa uyarı iletildi.\n"
+        f"• Son durum: challenge kanalları *{challenge_channels}*, değerlendirme *{evaluation_channels}*, "
+        f"kuyrukta bekleyen *{queue_waiting}*.\n"
+        "• Slack socket kapatılıyor; konteyner / süreç çıkışı tamamlanıyor.\n"
+        "• Yeniden başlatınca admin kanalında bu bileşen için yine `başlatıldı` bildirimi gidecek."
+    )
+
+
+def notify_admin_embedded_slack_modules_startup() -> None:
+    """Özet / İngilizce / özellik talebi — challenge ile aynı Socket; ayrı Slack admin mesajları."""
+    try:
+        from services.summary_service.core.summarizer import is_summarizer_configured
+
+        summarizer_ok = bool(is_summarizer_configured())
+        sum_llm = "*hazır*" if summarizer_ok else "*yapılandırma eksik veya üretim çalışmayabilir*"
+    except Exception as exc:
+        _logger.warning("[NOTIFY] summary summarizer stat unavailable: %s", exc)
+        sum_llm = "*durum okunamadı*"
+
+    post_admin_status(
+        "Özet (summary) — başlatıldı",
+        detail_lines=(
+            "Rol: kanal mesajı özetleme; kayıtlı slash: `/channel-summary` (parametre varyantları), `/summary`.",
+            f"Özet üretimi (LLM) durumu: {sum_llm}.",
+            "Bağlantı: *Socket Mode ana challenge süreci ile paylaşımlı* (bu mesajı admin’de ayrı blok olarak görüyorsunuz).",
+        ),
+        log=_logger,
+    )
+    post_admin_status(
+        "İngilizce pratik — başlatıldı",
+        detail_lines=(
+            "Rol: pratik oturumu ve yazı akışı.",
+            "Kayıtlı slash: `/english`; genel kanal mesajları yazı teslimi olarak dinlenir.",
+            "Bağlantı: Socket Mode ana challenge süreci ile paylaşımlı.",
+        ),
+        log=_logger,
+    )
+    post_admin_status(
+        "Özellik talebi — başlatıldı",
+        detail_lines=(
+            "Rol: özellik talebi toplama ve yönetici akışı.",
+            "Kayıtlı slash: `/cemilimyapar`, `/cemil-report`; modal ve buton aksiyonları yüklü.",
+            "Veritabanı: ana Postgres havuzu ile paylaşımlı; arka plan işleri challenge asyncio döngüsünde.",
+            "Bağlantı: Socket Mode ana challenge süreci ile paylaşımlı.",
+        ),
+        log=_logger,
+    )
+
+
+def notify_admin_embedded_slack_modules_shutdown() -> None:
+    """Gömülü modüller için ayrı kapanış satırları (çekirdek challenge mesajından önce)."""
+    post_admin_status(
+        "Özet (summary) — kapatılıyor / durduruldu",
+        detail_lines=(
+            "Bu modül işleyicileri ana süreçle birlikte sonlanıyor; bölüşülen Slack socket kapatılmadan önce uyarı yayınlanıyor.",
+        ),
+        log=_logger,
+    )
+    post_admin_status(
+        "İngilizce pratik — kapatılıyor / durduruldu",
+        detail_lines=(
+            "`/english` ve mesaj tabanlı akış ana Socket kapanışıyla birlikte durur.",
+        ),
+        log=_logger,
+    )
+    post_admin_status(
+        "Özellik talebi — kapatılıyor / durduruldu",
+        detail_lines=(
+            "Slash ve modal işleyicileri ana süreçle birlikte sonlanır (`service_manager.stop` sıradaki adım).",
+        ),
+        log=_logger,
+    )
+
 
 def _community_broadcast_channel() -> str:
     """Uzantılı duyurular: SLACK_ANNOUNCEMENT_CHANNEL tanımlıysa o, değilse SLACK_CHALLENGE_CHANNEL."""
@@ -56,7 +157,7 @@ def notify_shutdown(
     pending_challenges: dict,
 ) -> None:
     """
-    Servis kapanmadan önce ilgili kanallara kısa bilgi; özet admin kanalına (kısaltmalı).
+    Servis kapanmadan önce ilgili kanallara kısa bilgi; admin kanalına okunaklı Türkçe kapanış özeti.
     registry ve queue'lar henüz temizlenmeden önce çağrılmalı.
     """
     s = get_settings()
@@ -120,16 +221,22 @@ def notify_shutdown(
                 + _clog("Tekrar `/challenge join` kullanabilirsiniz."),
             )
 
-    # 5. Admin — kapanış (emoji yok)
+    # 5. Admin — gömülü modüller, son olarak çekirdek challenge (ayrı mesajlar)
     ch_count = len(registry.challenge_channels())
     ev_count = len(registry.evaluation_channels())
     q_count = sum(q.count() for q in category_queues.values())
-    admin_lines = [
-        _admin_chg("EVT", "svc_dn shutdown_notify"),
-        _admin_chg("YAP", f"cnt_pch={ch_count} cnt_ech={ev_count} cnt_q={q_count}"),
-        _admin_chg("SRB", "sock_stop proc_exit"),
-    ]
-    _safe_public(admin_channel, "\n".join(admin_lines))
+    try:
+        notify_admin_embedded_slack_modules_shutdown()
+    except Exception as exc:
+        _logger.error("[NOTIFY] embedded stack shutdown admin failed: %s", exc)
+    _safe_public(
+        admin_channel,
+        _admin_challenge_shutdown_text(
+            challenge_channels=ch_count,
+            evaluation_channels=ev_count,
+            queue_waiting=q_count,
+        ),
+    )
 
     _logger.info("[NOTIFY] shutdown notifications sent")
 
@@ -177,7 +284,7 @@ def notify_cancelled_challenges(
 def notify_startup(registry) -> None:
     """
     Servis başladıktan ve registry dolduktan sonra.
-    Topluluk kanalına kısa özet; admin kanalına operasyon günlüğü (kısaltmalı).
+    Topluluk kanalına kısa özet; admin kanalına okunaklı Türkçe başlangıç özeti.
     """
     s = get_settings()
     challenge_channel = s.slack_challenge_channel
@@ -226,15 +333,15 @@ def notify_startup(registry) -> None:
     )
     _safe_public(challenge_channel, community_text)
 
-    # 4. Admin — açılış (emoji yok)
-    admin_text = "\n".join(
-        [
-            _admin_chg("EVT", "svc_up reg_ok"),
-            _admin_chg("YAP", f"cnt_pch={ch_count} cnt_ech={ev_count}"),
-            _admin_chg("SRB", "sock_listen mon_run"),
-        ]
+    # 4. Admin — çekirdek challenge, ardından gömülü modüller (ayrı Slack mesajları)
+    _safe_public(
+        admin_channel,
+        _admin_challenge_startup_text(challenge_channels=ch_count, evaluation_channels=ev_count),
     )
-    _safe_public(admin_channel, admin_text)
+    try:
+        notify_admin_embedded_slack_modules_startup()
+    except Exception as exc:
+        _logger.error("[NOTIFY] embedded stack startup admin failed: %s", exc)
 
     _logger.info("[NOTIFY] startup notifications sent")
 

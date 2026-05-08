@@ -3,7 +3,8 @@
 # Önkoşul: proje kökünde Slack + Postgres dahil tam `.env` (bkz. `.env.template`).
 # Konteynerler `x-db-env` ile postgres servisine baglanir (sifre: .env veya varsayilan `postgres`).
 #
-# Varsayılan: postgres + migrate + challenge (Socket) + event (scheduler, --socket yok).
+# Varsayılan: postgres + migrate + challenge (tek Socket; özet + İngilizce + özellik talebi handler'ları içeride) + event (scheduler).
+# Admin kanalı: event bir mesaj + challenge konteyneri dört blok (çekirdek challenge + özet + İngilizce + özellik talebi).
 # Aynı Slack app token ile ikinci bir Socket Mode süreci çalıştırmayın.
 #
 # Sadece özellik talebi süreci (challenge yok): docker compose --profile feature-standalone up -d
