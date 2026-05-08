@@ -1,0 +1,73 @@
+# Hostinger VPS (SSH + Docker) için dağıtım.
+#
+# Sunucu tarafı (bir kez):
+#   1) Docker ve Docker Compose plugin kurulu olsun.
+#   2) Bu repoyu hedef dizine klonlayın (ör. /home/deploy/Slack-Community-Agent).
+#   3) Proje kökünde .env dosyasını oluşturun (.env.template’e göre); repoya eklenmez.
+#   4) SSH kullanıcısı `docker` komutunu çalıştırabilsin (docker grubu veya sudo docker).
+#   5) Sunucudan `git pull` için: deploy key (read) veya HTTPS credential.
+#
+# GitHub → Settings → Secrets and variables → Actions:
+#   HOSTINGER_HOST          Sunucu IP veya alan adı
+#   HOSTINGER_USER          SSH kullanıcı adı
+#   HOSTINGER_SSH_PRIVATE_KEY   OpenSSH özel anahtar (PEM, tam blok)
+#   HOSTINGER_DEPLOY_PATH   Repo kökünün mutlak yolu (örn. /home/deploy/Slack-Community-Agent)
+#
+# İsteğe bağlı:
+#   HOSTINGER_SSH_PORT      Varsayılan 22
+#   HOSTINGER_BRANCH        Varsayılan main
+#   HOSTINGER_DOCKER        Varsayılan "docker"; gerekirse "sudo docker" yazın
+
+name: Deploy to Hostinger
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-hostinger-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  compose-validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Yerelde .env yokken bile compose içindeki env_file başvurusu parse edilsin diye boş dosya.
+      - name: Placeholder .env for compose config
+        run: touch .env
+
+      - name: Validate Docker Compose file
+        run: docker compose -f docker-compose.yml config --quiet
+
+  deploy:
+    needs: compose-validate
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Deploy over SSH
+        uses: appleboy/ssh-action@v1.2.0
+        env:
+          DEPLOY_PATH: ${{ secrets.HOSTINGER_DEPLOY_PATH }}
+          GIT_BRANCH: ${{ secrets.HOSTINGER_BRANCH }}
+        with:
+          host: ${{ secrets.HOSTINGER_HOST }}
+          username: ${{ secrets.HOSTINGER_USER }}
+          key: ${{ secrets.HOSTINGER_SSH_PRIVATE_KEY }}
+          port: ${{ secrets.HOSTINGER_SSH_PORT != '' && secrets.HOSTINGER_SSH_PORT || 22 }}
+          envs: DEPLOY_PATH,GIT_BRANCH
+          script_stop: true
+          script: |
+            set -eu
+            BRANCH="${GIT_BRANCH:-main}"
+            test -n "${DEPLOY_PATH:-}" || { echo "HOSTINGER_DEPLOY_PATH boş"; exit 1; }
+            cd "$DEPLOY_PATH"
+            git fetch origin
+            git checkout "$BRANCH"
+            git pull --ff-only origin "$BRANCH"
+            DC="${{ secrets.HOSTINGER_DOCKER }}"
+            if [ -z "${DC}" ]; then DC=docker; fi
+            ${DC} compose -f docker-compose.yml up -d --build
