@@ -83,7 +83,14 @@ class WritingMode:
         }
 
     def evaluate(self, session: Session, user_text: str):
-        return self.analyzer.analyze(session, user_text)
+        result = self.analyzer.analyze(session, user_text)
+        # Yalnızca gerçek LLM geri bildirimi başarılıysa yazı beklemeyi kapat; "çok kısa/boş" için beklemeye devam.
+        if (
+            result.get("type") == "writing_feedback"
+            and result.get("raw_feedback") is not None
+        ):
+            session.step = "writing_completed"
+        return result
 
     def _ensure_writing_state(self, session: Session):
         if not hasattr(session, "data") or session.data is None:

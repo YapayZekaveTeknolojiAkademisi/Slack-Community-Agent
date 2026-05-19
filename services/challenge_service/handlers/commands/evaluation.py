@@ -116,6 +116,8 @@ def handle_evaluate(client, body: dict) -> None:
         f"*📌 Proje:* {project_name}",
         f"*👥 Ekip:* {team_mentions}",
     ]
+    if ct:
+        info_lines.append(f"*⭐ Şablon puanı:* `{ct.points}`")
     if ct and ct.description:
         info_lines.append(f"*📝 Açıklama:* {ct.description}")
     github_url = submission.get("github_url", "")

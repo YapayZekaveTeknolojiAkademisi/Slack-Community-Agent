@@ -18,6 +18,11 @@ settings = get_settings()
 _groq: Groq | None = None
 
 
+def is_summarizer_configured() -> bool:
+    """Groq ile özet için `GROQ_API_KEY` atanmış mı (canlı ayar okur)."""
+    return bool(get_settings().groq_api_key)
+
+
 def _get_groq_client() -> Groq:
     global _groq
     if _groq is None:
@@ -35,6 +40,8 @@ Sen bir Slack kanal asistanısın. Mesajları çok kısa ve öz Türkçe özetle
 Kurallar:
 - Her konu için en fazla 1-2 cümle
 - Sadece en önemli kararları ve tartışmaları yaz
+- Mesajlarda geçiyorsa: yapılması istenen işler/görevler ve katılım veya tarih gerektiren etkinlikleri
+  (toplantı, workshop, başvuru son tarihi vb.) en fazla 1-2 maddeyle ayrıca belirt (uydurma)
 - Maksimum 5-6 madde olsun
 - Markdown bullet list kullan
 """
@@ -49,8 +56,13 @@ Kurallar:
 - Reaksiyon alan (popüler) mesajları vurgula
 - Gereksiz selamlaşma ve emoji spam'i atla
 - Konuları başlıklar altında grupla
+- Mesajlarda açıkça geçiyorsa aşağıdaki başlıkları kullan (içerik yoksa o başlığı yazma):
+  ## Yapılması gerekenler / görevler — atanan veya bekleyen işler, teslim tarihi, onay, takip
+  ## Katılım ve etkinlikler — toplantı, etkinlik, çağrı, kayıt; tarih/saat veya link varsa yaz
+- Sadece mesajlarda dayanağı olan şeyleri yaz; tahmin veya uydurma yapma
 - Markdown formatı kullan
 """
+
 
 _CHUNK_USER = """\
 Aşağıdaki Slack mesajlarını özetle:
@@ -65,8 +77,14 @@ Kurallar:
 - Tekrar eden bilgileri birleştir
 - Kronolojik sırayı koru
 - Ana konuları başlıklar altında grupla
+- Parçalardan gelen yapılması gerekenler/görevler ve katılım-etkinlik bilgilerini kaybetmeden birleştir;
+  tekrarları tekilleştir
+- Çıktının üslubu parçalarla uyumlu olsun: parçalar ayrıntılıysa gerektiğinde
+  ## Yapılması gerekenler / görevler ve ## Katılım ve etkinlikler başlıklarını kullan;
+  parçalar çok kısaysa aynı bilgiyi sadece birkaç maddeyle işaretle, gereksiz uzatma
 - Markdown formatı kullan
 """
+
 
 _REDUCE_USER = """\
 Aşağıdaki özet parçalarını birleştir:
@@ -79,10 +97,14 @@ Sen bir Slack asistanısın. Aşağıdaki mesajlar bir kullanıcıyı doğrudan 
 (mention edildiği, thread'lerine yanıt gelen mesajlar).
 
 Bu mesajları kısa ve öz şekilde Türkçe özetle:
+- Bu kişinin yapması gereken aksiyonlar (deadline varsa yaz)
+- Bu kişinin katılması davet/check-in gerektiren etkinlik, toplantı veya çağrılar (varsa)
 - Kimin ne sorduğunu veya ne istediğini belirt
-- Acil veya önemli görünen mesajları vurgula
+- Acil veya önemli görünen mesajları başta öne çıkar
+- Mesajda yoksa görev veya etkinlik uydurma
 - Markdown formatı kullan
 """
+
 
 _PERSONAL_USER = """\
 Bu mesajlar seni doğrudan ilgilendiriyor:
@@ -92,7 +114,11 @@ Bu mesajlar seni doğrudan ilgilendiriyor:
 
 # ── Model ayarları ───────────────────────────────────────────────
 
-_MODEL = "llama-3.1-8b-instant"
+
+def _groq_model_name() -> str:
+    return settings.groq_model or "llama-3.1-8b-instant"
+
+
 _TEMPERATURE = 0.3
 
 
@@ -100,7 +126,7 @@ def _call_llm(system_prompt: str, user_prompt: str, max_tokens: int = 1024) -> s
     client = _get_groq_client()
     try:
         resp = client.chat.completions.create(
-            model=_MODEL,
+            model=_groq_model_name(),
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
@@ -198,3 +224,36 @@ def summarize_personal(personal_chunks: list[str]) -> str:
         f"Aşağıdaki özetleri birleştir:\n\n{combined}",
         max_tokens=512,
     )
+
+
+_SUMMARY_TRANSIENT_OVERLOAD_TEXT = (
+    "Şu an yüksek trafik veya kısa süreli kota nedeniyle isteğinizi tamamlayamadım — "
+    "bu bir ara verme değildir ve sistem çökmedi. Lütfen birkaç dakika sonra tekrar deneyin."
+)
+
+
+def summarizer_exc_is_transient_overload(exc: BaseException) -> bool:
+    """
+    Groq tarafında tekrar denemeyi gerektiren (rate limit / timeout / geçici 5xx) hatalar.
+    """
+    from groq import (
+        APITimeoutError,
+        APIStatusError,
+        InternalServerError,
+        RateLimitError,
+    )
+
+    if isinstance(exc, (RateLimitError, APITimeoutError)):
+        return True
+    if isinstance(exc, InternalServerError):
+        return True
+    if isinstance(exc, APIStatusError):
+        sc = getattr(exc, "status_code", None)
+        if sc in (408, 429, 500, 502, 503, 529):
+            return True
+    return False
+
+
+def transient_overload_user_text() -> str:
+    """Kullanıcıya gösterilecek ortak Türkçe metin."""
+    return _SUMMARY_TRANSIENT_OVERLOAD_TEXT

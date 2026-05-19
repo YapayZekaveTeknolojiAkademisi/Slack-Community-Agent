@@ -1,5 +1,4 @@
 import ast
-import logging
 import random
 import re
 
@@ -16,8 +15,7 @@ from services.english_service.core.prompt_builder import (
 )
 from services.english_service.llm.client import BaseLLMClient, GroqLLMClient
 from services.english_service.core.semantic_similarity import is_semantically_repeated
-
-logger = logging.getLogger(__name__)
+from services.english_service.logger import _logger
 
 
 class QuizMode:
@@ -86,18 +84,18 @@ class QuizMode:
             llm_response = self.llm.generate(prompt)
         except Exception as exc:
             Metrics.inc("quiz_validation_failures")
-            logger.warning(
+            _logger.warning(
                 "Quiz generation failed. Falling back to fallback quiz. error=%s",
                 exc,
             )
             return self._start_fallback_quiz(session)
 
-        logger.debug("Quiz raw response: %s", llm_response)
+        _logger.debug("Quiz raw response: %s", llm_response)
 
         questions = self._parse_questions_response(llm_response)
         if questions is None:
             Metrics.inc("json_parse_failures")
-            logger.warning("Quiz response parsing failed. Falling back to fallback quiz.")
+            _logger.warning("Quiz response parsing failed. Falling back to fallback quiz.")
             return self._start_fallback_quiz(session)
 
         validated_questions = self._basic_validate_questions(
@@ -106,7 +104,7 @@ class QuizMode:
             level=session.level,
         )
 
-        logger.debug(
+        _logger.debug(
             "Quiz generated=%s basic_valid=%s",
             len(questions),
             len(validated_questions),
@@ -114,7 +112,7 @@ class QuizMode:
 
         if not validated_questions:
             Metrics.inc("quiz_validation_failures")
-            logger.warning("Quiz basic validation returned no valid questions.")
+            _logger.warning("Quiz basic validation returned no valid questions.")
             return self._start_fallback_quiz(session)
 
         llm_validated_questions = self._llm_validate_questions(
@@ -124,7 +122,7 @@ class QuizMode:
 
         if llm_validated_questions is None:
             Metrics.inc("quiz_validation_failures")
-            logger.warning("Quiz LLM validation failed. Falling back to fallback quiz.")
+            _logger.warning("Quiz LLM validation failed. Falling back to fallback quiz.")
             return self._start_fallback_quiz(session)
 
         validated_questions = self._basic_validate_questions(
@@ -133,7 +131,7 @@ class QuizMode:
             level=session.level,
         )
 
-        logger.debug(
+        _logger.debug(
             "Quiz llm_validated=%s final_valid=%s",
             len(llm_validated_questions),
             len(validated_questions),
@@ -146,14 +144,14 @@ class QuizMode:
                 previous_questions=previous_questions,
             )
 
-            logger.debug(
+            _logger.debug(
                 "Quiz completed with fallback. final_count=%s",
                 len(validated_questions),
             )
 
         if len(validated_questions) < self.MIN_VALID_QUESTIONS:
             Metrics.inc("quiz_validation_failures")
-            logger.warning("Quiz could not be completed with fallback questions.")
+            _logger.warning("Quiz could not be completed with fallback questions.")
             return self._start_fallback_quiz(session)
 
         selected_questions = self._select_balanced_questions(
@@ -230,17 +228,34 @@ class QuizMode:
             return self.finish_quiz(session)
 
         question = questions[current_index]
+        try:
+            qtext = question["question"]
+            opts = question["options"]
+        except (KeyError, TypeError):
+            Metrics.inc("quiz_validation_failures")
+            _logger.warning("Malformed quiz_questions[%s]: %s", current_index, question)
+            return {
+                "type": "quiz_error",
+                "message": "Quiz data is invalid. Please start over with `/english`.",
+            }
+
+        if not isinstance(opts, list) or len(opts) != 3:
+            Metrics.inc("quiz_validation_failures")
+            return {
+                "type": "quiz_error",
+                "message": "Quiz options corrupted. Please start over with `/english`.",
+            }
 
         options_text = "\n".join(
             f"{idx + 1}. {option}"
-            for idx, option in enumerate(question["options"])
+            for idx, option in enumerate(opts)
         )
 
         return {
             "type": "quiz_question",
             "message": (
                 f"Question {current_index + 1}/{len(questions)}\n"
-                f"{question['question']}\n"
+                f"{qtext}\n"
                 f"{options_text}"
             ),
         }
@@ -399,7 +414,7 @@ class QuizMode:
                 explanation=cleaned_explanation,
             ):
                 Metrics.inc("quiz_validation_failures")
-                logger.debug(
+                _logger.debug(
                     "Quiz question rejected due to explanation contradiction. question=%s answer=%s explanation=%s",
                     cleaned_question,
                     canonical_answer,
@@ -437,24 +452,24 @@ class QuizMode:
             response = self.validator_llm.generate(prompt)
         except Exception as exc:
             Metrics.inc("quiz_validation_failures")
-            logger.warning(
+            _logger.warning(
                 "Quiz LLM validation request failed. Using basic-validated questions. error=%s",
                 exc,
             )
             return questions
 
-        logger.debug("Quiz validation response: %s", response)
+        _logger.debug("Quiz validation response: %s", response)
 
         validated_questions = self._parse_questions_response(response)
 
         if validated_questions is None:
             Metrics.inc("json_parse_failures")
-            logger.warning("Quiz validation response parsing failed.")
+            _logger.warning("Quiz validation response parsing failed.")
             return None
 
         if not isinstance(validated_questions, list):
             Metrics.inc("quiz_validation_failures")
-            logger.warning(
+            _logger.warning(
                 "Quiz validation response is not a list. response_type=%s",
                 type(validated_questions).__name__,
             )
@@ -665,7 +680,7 @@ class QuizMode:
 
     def _start_fallback_quiz(self, session: Session):
         Metrics.inc("quiz_fallback_used")
-        logger.warning(
+        _logger.warning(
             "QUIZ FALLBACK USED. level=%s metrics=%s",
             session.level,
             Metrics.snapshot(),

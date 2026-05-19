@@ -5,8 +5,12 @@ from typing import Any
 
 from packages.logger.manager import get_logger, start_logging
 
-_LOG_DIR = Path(__file__).resolve().parent.parent.parent / "logs" / "challenge_service"
+_ROOT_LOGS = Path(__file__).resolve().parent.parent.parent / "logs"
+_LOG_DIR = _ROOT_LOGS / "challenge_service"
 _LOG_DIR.mkdir(parents=True, exist_ok=True)
+# Feature request clustering runs inside this process; FR logger config is skipped after first start_logging.
+_FR_CLUSTERING_LOG_DIR = _ROOT_LOGS / "feature_request_service"
+_FR_CLUSTERING_LOG_DIR.mkdir(parents=True, exist_ok=True)
 
 CHALLENGE_SERVICE_LOGGING: dict[str, Any] = {
     "version": 1,
@@ -24,6 +28,9 @@ CHALLENGE_SERVICE_LOGGING: dict[str, Any] = {
         "queue": {
             "()": "packages.logger.formatters.QueueMessageFormatter",
         },
+        "clustering": {
+            "()": "packages.logger.formatters.ClusteringFormatter",
+        },
     },
     "filters": {
         "system_only": {
@@ -37,6 +44,9 @@ CHALLENGE_SERVICE_LOGGING: dict[str, Any] = {
         },
         "queue_only": {
             "()": "packages.logger.filters.QueueFilter",
+        },
+        "clustering_only": {
+            "()": "packages.logger.filters.ClusteringFilter",
         },
     },
     "handlers": {
@@ -87,10 +97,20 @@ CHALLENGE_SERVICE_LOGGING: dict[str, Any] = {
             "backupCount": 5,
             "encoding": "utf-8",
         },
+        "clustering": {
+            "class": "logging.handlers.RotatingFileHandler",
+            "level": "INFO",
+            "formatter": "clustering",
+            "filters": ["clustering_only"],
+            "filename": str(_FR_CLUSTERING_LOG_DIR / "clustering.log"),
+            "maxBytes": 5 * 1024 * 1024,
+            "backupCount": 10,
+            "encoding": "utf-8",
+        },
     },
     "root": {
         "level": "INFO",
-        "handlers": ["stdout", "console", "errors", "api", "queue"],
+        "handlers": ["stdout", "console", "errors", "api", "queue", "clustering"],
     },
 }
 

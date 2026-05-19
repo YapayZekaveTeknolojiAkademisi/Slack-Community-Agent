@@ -1,12 +1,11 @@
 """Modal submit ve buton action handler'ları."""
 
-from packages.database.manager import db
 from packages.settings import get_settings
 from packages.slack.blocks.layouts import Layouts
 from packages.slack.client import slack_client
 from services.feature_request_service.core.event_loop import run_async
 from services.feature_request_service.logger import get_logger
-from services.feature_request_service.service import FeatureRequestService
+from services.feature_request_service.manager import service_manager
 from services.feature_request_service.utils.notifications import (
     NotificationType,
     send_notification,
@@ -14,14 +13,10 @@ from services.feature_request_service.utils.notifications import (
 
 logger = get_logger("feature_request_service.handlers.events")
 app = slack_client.app
-_service = None
 
 
 def _svc():
-    global _service
-    if _service is None:
-        _service = FeatureRequestService(db)
-    return _service
+    return service_manager._service
 
 
 @app.view("feature_request_modal")

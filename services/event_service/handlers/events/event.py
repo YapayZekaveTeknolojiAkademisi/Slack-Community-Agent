@@ -16,15 +16,70 @@ from packages.settings import get_settings
 from packages.slack.client import slack_client
 from ...logger import _logger
 from ...utils.notifications import (
-    post_admin_request, post_announcement, post_update_announcement, send_dm,
+    _location_display,
+    post_admin_request,
+    post_announcement,
+    post_update_announcement,
+    send_dm,
+    update_admin_request_message,
 )
 from ...utils.email import send_admin_notification, send_user_status_email
-from ...utils.calendar import build_google_calendar_url
-from ...utils.notifications import _location_display
+from ...utils.slack_io import run_slack_io
 from packages.slack.blocks.builder import MessageBuilder
+from ...handlers.commands.event import pending_quota_denial_message
 
 app: App = slack_client.app
 settings = get_settings()
+
+
+class EventPendingQuotaExceeded(Exception):
+    """Kullanici bekleyen talep limitini astiginda `_create()` icinden."""
+
+    def __init__(self, *, limit: int, pending: int) -> None:
+        self.limit = limit
+        self.pending = pending
+
+
+_ADMIN_DENY_BTN = (
+    "Bu işlemi yalnızca `SLACK_ADMINS` içinde kayıtlı yöneticiler yapabilir. "
+    "Yardım için workspace yöneticinize başvurun."
+)
+_ADMIN_DENY_VIEW = (
+    "Etkinlik onayı veya reddi yalnızca yapılandırmada tanımlı yöneticiler "
+    "(`SLACK_ADMINS`) tarafından yapılabilir."
+)
+
+
+def _slack_user_id(body: dict) -> str:
+    return (body.get("user") or {}).get("id") or ""
+
+
+def _notify_ephemeral_or_dm(client, *, channel_id: str | None, user_id: str, text: str) -> None:
+    """Kanal ephemeral; olmazsa kullanıcıya DM veya chat_postMessage(user)."""
+    try:
+        if channel_id:
+            client.chat_postEphemeral(channel=channel_id, user=user_id, text=text)
+            return
+    except Exception:
+        pass
+    try:
+        client.chat_postMessage(channel=user_id, text=text)
+    except Exception:
+        send_dm(user_id, text)
+
+
+def _ack_only_event_admin(ack: Ack, body: dict, client, *, denial_text: str = _ADMIN_DENY_BTN) -> bool:
+    """
+    Onay/red butonları için: her zaman ack; yalnızca SLACK_ADMINS üyesi True döner.
+    """
+    user_id = _slack_user_id(body)
+    ack()
+    if user_id in settings.slack_admins:
+        return True
+    ch = (body.get("channel") or {}).get("id")
+    _notify_ephemeral_or_dm(client, channel_id=ch or None, user_id=user_id, text=denial_text)
+    _logger.warning("[EVT] Non-admin blocked on approve/reject button user=%s", user_id)
+    return False
 
 
 def _run_async(coro, timeout=30.0):
@@ -49,15 +104,16 @@ def _extract_form_values(values: dict) -> dict:
     }
 
 
-def _validate_form(data: dict) -> str | None:
-    """Backend validasyonu. Hata mesaji doner, gecerliyse None."""
+def _validate_form_errors(data: dict) -> dict[str, str] | None:
+    """Geçersizse Slack modal `errors` için block_id → mesaj sözlüğü (tek veya birkaç alan)."""
+    errors: dict[str, str] = {}
     if data["location_type"] == LocationType.SLACK_CHANNEL and not data.get("channel_id"):
-        return "Slack Kanalı seçildiğinde kanal alanı zorunludur."
+        errors["event_channel"] = "Slack Kanalı seçildiğinde kanalı bu alandan seçmelisiniz."
     if data["location_type"] != LocationType.SLACK_CHANNEL and not data.get("link"):
-        return "Harici platform seçildiğinde link alanı zorunludur."
+        errors["event_link"] = "Harici platform seçildiğinde bağlantı zorunludur."
     if not data.get("date") or not data.get("time"):
-        return "Tarih ve saat zorunludur."
-    return None
+        errors["event_date"] = "Tarih ve saat zorunludur."
+    return errors if errors else None
 
 
 # ---------------------------------------------------------------------------
@@ -70,17 +126,22 @@ def handle_create_modal(ack: Ack, body: dict, client, view):
     values = view["state"]["values"]
     data = _extract_form_values(values)
 
-    error = _validate_form(data)
-    if error:
-        ack(response_action="errors", errors={"event_location": error})
+    errors = _validate_form_errors(data)
+    if errors:
+        ack(response_action="errors", errors=errors)
         return
-    ack()
 
     evt_date = datetime.strptime(data["date"], "%Y-%m-%d").date()
     evt_time = datetime.strptime(data["time"], "%H:%M").time()
 
     async def _create():
         async with db.session() as session:
+            repo = EventRepository(session)
+            lim = settings.event_max_pending_per_user
+            if lim > 0:
+                n = await repo.count_pending_by_creator(user_id)
+                if n >= lim:
+                    raise EventPendingQuotaExceeded(limit=lim, pending=n)
             event = Event(
                 creator_slack_id=user_id,
                 name=data["name"],
@@ -101,22 +162,50 @@ def handle_create_modal(ack: Ack, body: dict, client, view):
 
     try:
         event = _run_async(_create())
+    except EventPendingQuotaExceeded as ex:
+        ack(
+            response_action="errors",
+            errors={"event_name": pending_quota_denial_message(ex.limit, ex.pending)},
+        )
+        return
     except Exception as e:
         _logger.error("[EVT] Create failed: %s", e)
+        ack()
         return
 
-    post_admin_request(event)
-    send_admin_notification(event)
+    ack()
 
     loc = _location_display(event)
     confirm_text = (
-        f"Etkinlik talebiniz başarıyla iletildi!\n\n"
+        "*Talebiniz alındı*\n\n"
         f"*{event.name}*\n"
         f"{event.date.strftime('%d %B %Y')} · {event.time.strftime('%H:%M')} · {loc}\n\n"
-        f"Admin onayını bekliyor. Sonuç Slack DM ve e-posta ile bildirilecek.\n"
-        f"_Talep ID: {event.id}_"
+        "Formda gönderdiğiniz etkinlik kaydı yöneticilere iletildi. "
+        "Onay veya ret kararı buradan (Slack DM) size bildirilecek; "
+        "hesabınızda e-posta tanımlıysa özet oraya da gidebilir.\n\n"
+        f"_Talep: `{event.id}`_"
     )
-    send_dm(user_id, confirm_text)
+
+    def _slack_create():
+        ref = post_admin_request(event)
+        send_dm(user_id, confirm_text)
+        return ref
+
+    admin_ref = run_slack_io(_slack_create)
+    if admin_ref:
+        ad_ch, ad_ts = admin_ref
+
+        async def _persist_admin_slack():
+            async with db.session() as session:
+                ent = await session.get(Event, event.id)
+                if ent:
+                    meta = dict(ent.meta or {})
+                    meta["admin_slack_channel"] = ad_ch
+                    meta["admin_slack_ts"] = ad_ts
+                    ent.meta = meta
+
+        _run_async(_persist_admin_slack())
+    send_admin_notification(event)
 
     _logger.info("[EVT] Event created: %s by %s", event.id, user_id)
 
@@ -211,9 +300,9 @@ def handle_update_modal(ack: Ack, body: dict, client, view):
     values = view["state"]["values"]
     data = _extract_form_values(values)
 
-    error = _validate_form(data)
-    if error:
-        ack(response_action="errors", errors={"event_location": error})
+    errors = _validate_form_errors(data)
+    if errors:
+        ack(response_action="errors", errors=errors)
         return
     ack()
 
@@ -287,14 +376,17 @@ def handle_update_modal(ack: Ack, body: dict, client, view):
         f"*Güncelleyen:* <@{user_id}>\n\n"
         f"*Değişen Alanlar:*\n" + "\n".join(diff_lines) + f"\n\n_{evt.id}_"
     )
-    try:
-        slack_client.bot_client.chat_postMessage(
-            channel=settings.slack_admin_channel, text=diff_text,
-        )
-    except Exception as e:
-        _logger.error("[EVT] Admin update notification failed: %s", e)
 
-    post_update_announcement(evt)
+    def slack_update_notify():
+        try:
+            slack_client.bot_client.chat_postMessage(
+                channel=settings.slack_admin_channel, text=diff_text,
+            )
+        except Exception as e:
+            _logger.error("[EVT] Admin update notification failed: %s", e)
+        post_update_announcement(evt)
+
+    run_slack_io(slack_update_notify)
 
     # Ilgi gosterenlere guncelleme e-postasi
     async def _notify_interested():
@@ -320,7 +412,8 @@ def handle_update_modal(ack: Ack, body: dict, client, view):
 
 @app.action("event_approve_btn")
 def handle_approve_btn(ack: Ack, body: dict, client, action):
-    ack()
+    if not _ack_only_event_admin(ack, body, client):
+        return
     event_id = action.get("value")
     trigger_id = body.get("trigger_id")
     client.views_open(
@@ -345,7 +438,8 @@ def handle_approve_btn(ack: Ack, body: dict, client, action):
 
 @app.action("event_reject_btn")
 def handle_reject_btn(ack: Ack, body: dict, client, action):
-    ack()
+    if not _ack_only_event_admin(ack, body, client):
+        return
     event_id = action.get("value")
     trigger_id = body.get("trigger_id")
     client.views_open(
@@ -370,9 +464,24 @@ def handle_reject_btn(ack: Ack, body: dict, client, action):
 
 @app.view("event_admin_approve_modal")
 def handle_admin_approve(ack: Ack, body: dict, client, view):
-    ack()
-    event_id = view.get("private_metadata")
     admin_id = body["user"]["id"]
+    if admin_id not in settings.slack_admins:
+        ack()
+        try:
+            send_dm(admin_id, f"⚠️ {_ADMIN_DENY_VIEW}")
+        except Exception:
+            _notify_ephemeral_or_dm(
+                client,
+                channel_id=(body.get("channel") or {}).get("id"),
+                user_id=admin_id,
+                text=f"⚠️ {_ADMIN_DENY_VIEW}",
+            )
+        _logger.warning("[EVT] Non-admin approve modal submit blocked user=%s", admin_id)
+        return
+
+    ack()
+
+    event_id = view.get("private_metadata")
     note = view["state"]["values"].get("admin_note", {}).get("val", {}).get("value")
 
     async def _approve():
@@ -386,34 +495,66 @@ def handle_admin_approve(ack: Ack, body: dict, client, view):
             if note:
                 evt.admin_note = note
             await session.flush()
+            await session.refresh(evt)
             return evt
 
     evt = _run_async(_approve())
     if not evt:
         return
 
-    note_text = f"\n*Admin Notu:* {note}" if note else ""
+    note_text = f"\n\n*Yönetici notu:* {note}" if note else ""
     loc = _location_display(evt)
-    send_dm(
-        evt.creator_slack_id,
-        f"Etkinliğiniz Onaylandı!\n\n"
+    ann_ch = (settings.slack_announcement_channel or "").strip()
+    if ann_ch:
+        duyuru_line = (
+            f"Herkese açık etkinlik duyurusu *yalnızca* duyuru kanalına gönderildi: <#{ann_ch}>\n"
+            f"_Talep: `{evt.id}`_"
+        )
+    else:
+        duyuru_line = (
+            "Etkinlik duyurusu ilgili Slack kanallarına gönderildi "
+            "(`.env` içinde `SLACK_ANNOUNCEMENT_CHANNEL` boş olduğu için varsayılan kanallar kullanıldı).\n"
+            f"_Talep: `{evt.id}`_"
+        )
+    creator_dm = (
+        f"*Etkinliğiniz onaylandı*{note_text}\n\n"
         f"*{evt.name}*\n"
-        f"{evt.date.strftime('%d %B %Y')} · {evt.time.strftime('%H:%M')} · {loc}"
-        f"{note_text}\n\n"
-        f"Duyuru #serbest-kürsü kanalına gönderildi.\n_{evt.id}_"
+        f"{evt.date.strftime('%d %B %Y')} · {evt.time.strftime('%H:%M')} · {loc}\n\n"
+        f"{duyuru_line}"
     )
 
+    def slack_approve_follow():
+        send_dm(evt.creator_slack_id, creator_dm)
+        update_admin_request_message(evt, outcome="approved", admin_id=admin_id, note=note)
+        post_announcement(evt)
+
+    run_slack_io(slack_approve_follow)
+
     send_user_status_email(evt.creator_slack_id, evt, "approved", note)
-    post_announcement(evt)
 
     _logger.info("[EVT] Event approved: %s by admin %s", event_id, admin_id)
 
 
 @app.view("event_admin_reject_modal")
 def handle_admin_reject(ack: Ack, body: dict, client, view):
-    ack()
-    event_id = view.get("private_metadata")
     admin_id = body["user"]["id"]
+    if admin_id not in settings.slack_admins:
+        ack()
+        try:
+            send_dm(admin_id, f"⚠️ {_ADMIN_DENY_VIEW}")
+        except Exception:
+            _notify_ephemeral_or_dm(
+                client,
+                channel_id=(body.get("channel") or {}).get("id"),
+                user_id=admin_id,
+                text=f"⚠️ {_ADMIN_DENY_VIEW}",
+            )
+        _logger.warning("[EVT] Non-admin reject modal submit blocked user=%s", admin_id)
+        return
+
+    ack()
+
+    event_id = view.get("private_metadata")
     note = view["state"]["values"].get("admin_note", {}).get("val", {}).get("value")
 
     async def _reject():
@@ -426,21 +567,27 @@ def handle_admin_reject(ack: Ack, body: dict, client, view):
             if note:
                 evt.admin_note = note
             await session.flush()
+            await session.refresh(evt)
             return evt
 
     evt = _run_async(_reject())
     if not evt:
         return
 
-    note_text = f"\n*Admin Notu:* {note}" if note else ""
-    send_dm(
-        evt.creator_slack_id,
-        f"Etkinliğiniz Reddedildi\n\n"
+    note_text = f"\n\n*Yönetici notu:* {note}" if note else ""
+    creator_dm = (
+        f"*Etkinlik talebiniz reddedildi*{note_text}\n\n"
         f"*{evt.name}*\n"
-        f"{evt.date.strftime('%d %B %Y')} · {evt.time.strftime('%H:%M')}"
-        f"{note_text}\n\n"
-        f"Yeni bir etkinlik talebi için `/event create` komutunu kullanabilirsiniz.\n_{evt.id}_"
+        f"{evt.date.strftime('%d %B %Y')} · {evt.time.strftime('%H:%M')}\n\n"
+        "Herkese duyuru yapılmadı. Yeni talep için `/event create` kullanabilirsiniz.\n"
+        f"_Talep: `{evt.id}`_"
     )
+
+    def slack_reject_follow():
+        send_dm(evt.creator_slack_id, creator_dm)
+        update_admin_request_message(evt, outcome="rejected", admin_id=admin_id, note=note)
+
+    run_slack_io(slack_reject_follow)
 
     send_user_status_email(evt.creator_slack_id, evt, "rejected", note)
 
@@ -516,17 +663,19 @@ def handle_interest_btn(ack: Ack, body: dict, client, action):
         ),
     )
 
-    # DM
-    cal_url = _calendar_url(evt)
-    dm_builder = MessageBuilder()
-    dm_builder.add_text(
-        f"İlgin kaydedildi!\n\n"
-        f"*{evt.name}*\n"
-        f"{evt.date.strftime('%d %B %Y')} · {evt.time.strftime('%H:%M')} · {loc}\n\n"
-        f"Etkinlik günü hatırlatma e-postası alacaksın.\n_{evt.id}_"
-    )
-    dm_builder.add_button("Google Takvime Ekle", "event_calendar_btn", value=evt.id, url=cal_url)
-    send_dm(user_id, f"İlgin kaydedildi: {evt.name}", dm_builder.build())
+    def interest_dm_slack():
+        cal_url = _calendar_url(evt)
+        dm_builder = MessageBuilder()
+        dm_builder.add_text(
+            f"İlgin kaydedildi!\n\n"
+            f"*{evt.name}*\n"
+            f"{evt.date.strftime('%d %B %Y')} · {evt.time.strftime('%H:%M')} · {loc}\n\n"
+            f"Etkinlik günü hatırlatma e-postası alacaksın.\n_{evt.id}_"
+        )
+        dm_builder.add_button("Google Takvime Ekle", "event_calendar_btn", value=evt.id, url=cal_url)
+        send_dm(user_id, f"İlgin kaydedildi: {evt.name}", dm_builder.build())
+
+    run_slack_io(interest_dm_slack)
 
     _logger.info("[EVT] Interest added: event=%s user=%s", event_id, user_id)
 
@@ -575,38 +724,36 @@ def handle_cancel_modal(ack: Ack, body: dict, client, view):
     if not evt:
         return
 
-    # Duyuru kanallarina iptal bildirisi
+    # Duyuru + admin kanalı + DM'ler — Slack Web API arka plan thread'de
     from ...utils.notifications import post_cancellation, send_dm as _send_dm
-    post_cancellation(evt, user_id)
 
-    # Admin kanalina iptal bildirimi
-    try:
-        slack_client.bot_client.chat_postMessage(
-            channel=settings.slack_admin_channel,
-            text=(
-                f"Etkinlik İptal Edildi\n\n"
-                f"*{evt.name}*\n"
-                f"{evt.date.strftime('%d %B %Y')} · {evt.time.strftime('%H:%M')}\n"
-                f"*Düzenleyen:* <@{evt.creator_slack_id}>\n"
-                f"*İptal Eden:* <@{user_id}>"
-            ),
-        )
-    except Exception as e:
-        _logger.warning("[EVT] Admin cancel notification failed: %s", e)
-
-    # Kullaniciya DM ile onay
-    _send_dm(
-        user_id,
-        f"Etkinlik başarıyla iptal edildi.\n*{evt.name}*\n"
-        f"{evt.date.strftime('%d %B %Y')} · {evt.time.strftime('%H:%M')}"
-    )
-
-    # Admin iptal ettiyse sahibe DM
-    if is_admin and evt.creator_slack_id != user_id:
+    def slack_cancel_follow():
+        post_cancellation(evt, user_id)
+        try:
+            slack_client.bot_client.chat_postMessage(
+                channel=settings.slack_admin_channel,
+                text=(
+                    f"Etkinlik İptal Edildi\n\n"
+                    f"*{evt.name}*\n"
+                    f"{evt.date.strftime('%d %B %Y')} · {evt.time.strftime('%H:%M')}\n"
+                    f"*Düzenleyen:* <@{evt.creator_slack_id}>\n"
+                    f"*İptal Eden:* <@{user_id}>"
+                ),
+            )
+        except Exception as e:
+            _logger.warning("[EVT] Admin cancel notification failed: %s", e)
         _send_dm(
-            evt.creator_slack_id,
-            f"Etkinliğiniz admin tarafından iptal edildi.\n*{evt.name}*"
+            user_id,
+            f"Etkinlik başarıyla iptal edildi.\n*{evt.name}*\n"
+            f"{evt.date.strftime('%d %B %Y')} · {evt.time.strftime('%H:%M')}",
         )
+        if is_admin and evt.creator_slack_id != user_id:
+            _send_dm(
+                evt.creator_slack_id,
+                f"Etkinliğiniz admin tarafından iptal edildi.\n*{evt.name}*",
+            )
+
+    run_slack_io(slack_cancel_follow)
 
     # Ilgi gosterenlere iptal e-postasi
     async def _notify_interested():
@@ -715,16 +862,19 @@ def handle_add_me_modal(ack: Ack, body: dict, client, view):
         except Exception as e:
             _logger.warning("[EVT] add_me ephemeral gonderilemedi: %s", e)
 
-    # 2) DM (tam detay + Google Takvime Ekle butonu)
-    cal_url = _calendar_url(evt)
-    dm_builder = MessageBuilder()
-    dm_builder.add_text(
-        f"İlgin kaydedildi!\n\n"
-        f"*{evt.name}*\n"
-        f"{evt.date.strftime('%d %B %Y')} · {evt.time.strftime('%H:%M')} · {loc}\n\n"
-        f"Etkinlik günü hatırlatma e-postası alacaksın.\n_{evt.id}_"
-    )
-    dm_builder.add_button("Google Takvime Ekle", "event_calendar_btn", value=evt.id, url=cal_url)
-    send_dm(user_id, f"İlgin kaydedildi: {evt.name}", dm_builder.build())
+    # 2) DM (tam detay + Google Takvime Ekle butonu; takvim lokasyonunda Slack API)
+    def add_me_dm_slack():
+        cal_url = _calendar_url(evt)
+        dm_builder = MessageBuilder()
+        dm_builder.add_text(
+            f"İlgin kaydedildi!\n\n"
+            f"*{evt.name}*\n"
+            f"{evt.date.strftime('%d %B %Y')} · {evt.time.strftime('%H:%M')} · {loc}\n\n"
+            f"Etkinlik günü hatırlatma e-postası alacaksın.\n_{evt.id}_"
+        )
+        dm_builder.add_button("Google Takvime Ekle", "event_calendar_btn", value=evt.id, url=cal_url)
+        send_dm(user_id, f"İlgin kaydedildi: {evt.name}", dm_builder.build())
+
+    run_slack_io(add_me_dm_slack)
 
     _logger.info("[EVT] Interest added via modal: event=%s user=%s", event_id, user_id)

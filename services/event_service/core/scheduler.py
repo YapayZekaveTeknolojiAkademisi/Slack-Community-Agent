@@ -16,11 +16,15 @@ from packages.database.manager import db
 from packages.database.models.event import Event, EventStatus
 from packages.database.repository.event import EventRepository, EventInterestRepository
 from packages.settings import get_settings
-from packages.slack.client import slack_client
 from packages.slack.blocks.builder import MessageBuilder
+from packages.slack.client import slack_client
 from ..logger import _logger
 from ..utils.notifications import (
-    get_announcement_channels, send_dm, _location_display, _calendar_url,
+    get_announcement_channels,
+    send_dm,
+    _location_display,
+    _calendar_url,
+    update_admin_request_message,
 )
 from ..utils.email import send_reminder_email_async, send_user_status_email_async
 
@@ -33,6 +37,15 @@ def _local_tz() -> ZoneInfo:
 def _now_local() -> datetime:
     """Yerel timezone'da simdiki zaman (timezone-aware)."""
     return datetime.now(_local_tz())
+
+
+async def _io_slack_chat_post(channel: str, text: str, blocks: list) -> None:
+    """Senkron Slack Web API çağrısını thread'de çalıştırır — asyncio döngüsünü bloklamaz."""
+
+    def _sync() -> None:
+        slack_client.bot_client.chat_postMessage(channel=channel, text=text, blocks=blocks)
+
+    await asyncio.to_thread(_sync)
 
 
 class EventScheduler:
@@ -82,8 +95,7 @@ class EventScheduler:
             for evt in expired:
                 evt.status = EventStatus.REJECTED
                 _logger.info("[SCHED] Timeout: %s", evt.id)
-                send_dm(
-                    evt.creator_slack_id,
+                dm_text = (
                     f"Etkinlik Talebiniz Zaman Aşımına Uğradı\n\n"
                     f"*{evt.name}*\n"
                     f"{evt.date.strftime('%d %B %Y')} · {evt.time.strftime('%H:%M')}\n\n"
@@ -91,7 +103,24 @@ class EventScheduler:
                     f"otomatik olarak reddedildi.\n\n"
                     f"Yeni bir etkinlik talebi için `/event create` komutunu kullanabilirsiniz.\n_{evt.id}_"
                 )
-                await send_user_status_email_async(evt.creator_slack_id, evt, "timeout")
+                try:
+                    await asyncio.to_thread(send_dm, evt.creator_slack_id, dm_text)
+                except Exception as e:
+                    _logger.warning("[SCHED] Timeout Slack DM failed event=%s: %s", evt.id, e)
+                try:
+                    await send_user_status_email_async(evt.creator_slack_id, evt, "timeout")
+                except Exception as e:
+                    _logger.warning("[SCHED] Timeout e-posta failed event=%s: %s", evt.id, e)
+                try:
+                    await asyncio.to_thread(
+                        update_admin_request_message,
+                        evt,
+                        outcome="timeout",
+                        admin_id=None,
+                        note=None,
+                    )
+                except Exception as e:
+                    _logger.warning("[SCHED] Timeout admin message update failed event=%s: %s", evt.id, e)
 
     # ---- 2. COMPLETED gecisi ----
 
@@ -145,7 +174,7 @@ class EventScheduler:
             for i, evt in enumerate(events, 1):
                 loc = _location_display(evt)
                 count = await interest_repo.count_by_event(evt.id)
-                cal_url = _calendar_url(evt)
+                cal_url = await asyncio.to_thread(_calendar_url, evt)
 
                 builder.add_text(
                     f"*{i}. {evt.name}*\n"
@@ -172,17 +201,20 @@ class EventScheduler:
 
             for ch in all_channels:
                 try:
-                    slack_client.bot_client.chat_postMessage(
-                        channel=ch,
-                        text=f"Bugünün Etkinlikleri — {local_today.strftime('%d %B %Y')}",
-                        blocks=blocks,
+                    await _io_slack_chat_post(
+                        ch,
+                        f"Bugünün Etkinlikleri — {local_today.strftime('%d %B %Y')}",
+                        blocks,
                     )
                 except Exception as e:
                     _logger.error("[SCHED] Morning reminder failed channel=%s: %s", ch, e)
 
         # E-posta gonder (read session kapandiktan sonra)
         for slack_id, evt in interested_users:
-            await send_reminder_email_async(slack_id, evt, "day")
+            try:
+                await send_reminder_email_async(slack_id, evt, "day")
+            except Exception as e:
+                _logger.warning("[SCHED] Morning reminder email skipped slack_id=%s: %s", slack_id, e)
 
         self._morning_reminder_last_date = local_today
         _logger.info("[SCHED] Morning reminder sent for %d events", len(events))
@@ -230,7 +262,7 @@ class EventScheduler:
         for evt, interested_ids in to_notify:
             loc = _location_display(evt)
             count = len(interested_ids)
-            cal_url = _calendar_url(evt)
+            cal_url = await asyncio.to_thread(_calendar_url, evt)
 
             builder = MessageBuilder()
             builder.add_header("10 Dakika Sonra Başlıyor!")
@@ -249,17 +281,20 @@ class EventScheduler:
             blocks = builder.build()
             for ch in get_announcement_channels(evt):
                 try:
-                    slack_client.bot_client.chat_postMessage(
-                        channel=ch,
-                        text=f"10 Dakika Sonra: {evt.name}",
-                        blocks=blocks,
+                    await _io_slack_chat_post(
+                        ch,
+                        f"10 Dakika Sonra: {evt.name}",
+                        blocks,
                     )
                 except Exception as e:
                     _logger.error("[SCHED] 10min reminder failed channel=%s: %s", ch, e)
 
             # E-posta gonder
             for slack_id in interested_ids:
-                await send_reminder_email_async(slack_id, evt, "10min")
+                try:
+                    await send_reminder_email_async(slack_id, evt, "10min")
+                except Exception as e:
+                    _logger.warning("[SCHED] 10min reminder email skipped slack_id=%s: %s", slack_id, e)
 
             _logger.info("[SCHED] 10min reminder sent: %s", evt.id)
 

@@ -9,6 +9,7 @@ from ...logger import _logger
 from ..queue.channel_registry import ChannelRegistry
 from ...utils.slack_helpers import slack_helper
 
+
 class EvaluationMonitor:
     """
     Değerlendirme Takibi Monitörü:
@@ -51,25 +52,21 @@ class EvaluationMonitor:
     async def check_evaluations(self) -> None:
         """Değerlendirmesi geciken jürileri ve challenge'ları kontrol eder."""
         settings = get_settings()
-        # Hatırlatma eşiği (örn: 24 saat)
         reminder_threshold_hours = settings.evaluation_max_wait_hours
-        # Kesin başarısızlık eşiği (örn: 24h + 24h = 48 saat)
         fail_threshold_hours = reminder_threshold_hours * 2
 
         async with db.session() as session:
             repo = ChallengeRepository(session)
             in_evaluation = await repo.list_in_evaluation()
-            
+
             now = datetime.now(timezone.utc)
             for challenge in in_evaluation:
                 if not challenge.evaluation_started_at:
                     continue
-                
-                # Değerlendirme başlamış, ne kadar süre geçti?
+
                 elapsed = now - challenge.evaluation_started_at
                 elapsed_hours = elapsed.total_seconds() / 3600
 
-                # 1. Senaryo: hatırlatma eşiğinin 2 katı aşıldıysa (kesin zaman aşımı)
                 if elapsed_hours >= fail_threshold_hours:
                     _logger.warning(
                         "[EVAL] Timeout (%sh): %s",
@@ -79,44 +76,44 @@ class EvaluationMonitor:
 
                     if challenge.evaluation_channel_id:
                         ecid = challenge.evaluation_channel_id
-                        slack_helper.send_announcement(
-                            channel_id=ecid,
-                            text=(
+                        await asyncio.to_thread(
+                            slack_helper.send_announcement,
+                            ecid,
+                            (
                                 f"🚨 **Değerlendirme Zaman Aşımı!**\n\n"
                                 f"Jüri değerlendirmesi {int(fail_threshold_hours)} saat içinde tamamlanamadı. "
                                 "Süreç başarısız olarak sonlandırılıyor."
                             ),
                         )
-                        slack_helper.archive_channel(ecid)
+                        await asyncio.to_thread(slack_helper.archive_channel, ecid)
                         self._registry.unregister_evaluation(ecid)
-                        # Arşivlendi; yoksa RESUME sonrası _on_startup EVALUATION_DELAYED için bu ID ile registry doldurur
                         challenge.evaluation_channel_id = None
 
                     challenge.status = ChallengeStatus.EVALUATION_DELAYED
                     challenge.evaluation_ended_at = now
                     continue
 
-                # 2. Senaryo: hatırlatma eşiği aşıldı (EVALUATION_MAX_WAIT_HOURS)
                 if elapsed_hours >= reminder_threshold_hours:
-                    meta = challenge.meta or {}
+                    meta = dict(challenge.meta or {})
                     if not meta.get("evaluation_reminder_sent"):
                         _logger.info("[EVAL] Reminder sent: %s", challenge.id)
-                        
+
                         if challenge.evaluation_channel_id:
-                            # Jüri üyelerini etiketleyebiliriz
-                            jury_mentions = " ".join([f"<@{jm.slack_id}>" for jm in challenge.challenge_jury_members if jm.slack_id])
-                            
-                            slack_helper.send_announcement(
-                                channel_id=challenge.evaluation_channel_id,
-                                text=(
+                            jury_mentions = " ".join(
+                                f"<@{jm.slack_id}>"
+                                for jm in challenge.challenge_jury_members
+                                if jm.slack_id
+                            )
+                            await asyncio.to_thread(
+                                slack_helper.send_announcement,
+                                challenge.evaluation_channel_id,
+                                (
                                     f"🔔 **Hatırlatma!**\n\n{jury_mentions} "
                                     f"Değerlendirme süreci {int(reminder_threshold_hours)} saattir devam ediyor. "
                                     "Lütfen sonuçları en kısa sürede iletin. "
                                     f"Kalan süre: **{max(0, int(fail_threshold_hours - elapsed_hours))} saat**."
                                 ),
                             )
-                        
+
                         meta["evaluation_reminder_sent"] = True
                         challenge.meta = meta
-            
-            await session.commit()

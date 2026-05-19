@@ -19,11 +19,6 @@ class SystemSettings(BaseSettings):
         validation_alias=AliasChoices("SLACK_WORKSPACE_OWNER_ID", "slack_workspace_owner_id"),
         description="Workspace owner Slack user ID (opsiyonel)",
     )
-    slack_admin_slack_id_csv: str = Field(
-        "",
-        validation_alias=AliasChoices("SLACK_ADMIN_SLACK_ID", "slack_admin_slack_id_csv"),
-        description="Admin(ler) Slack user ID — virgülle ayrılmış veya tek ID; ilk ID slack_admin_slack_id olarak kullanılır",
-    )
     slack_challenge_channel: str = Field(
         ...,
         validation_alias=AliasChoices("SLACK_CHALLENGE_CHANNEL", "slack_challenge_channel"),
@@ -34,10 +29,21 @@ class SystemSettings(BaseSettings):
         validation_alias=AliasChoices("SLACK_ADMIN_CHANNEL", "slack_admin_channel"),
         description="Admin bildirim kanalı (C...)",
     )
-    slack_admins_raw: str = Field(
+    slack_announcement_channel: Optional[str] = Field(
+        None,
+        validation_alias=AliasChoices(
+            "SLACK_ANNOUNCEMENT_CHANNEL", "slack_announcement_channel"
+        ),
+        description="Tüm etkinlik duyuruları bu kanala (C...); boşsa EVENT_CHANNEL + lokasyon kanalı",
+    )
+    slack_admins_csv: str = Field(
         "",
-        validation_alias=AliasChoices("SLACK_ADMINS", "slack_admins_raw"),
-        description="Virgülle ayrılmış admin Slack user ID (opsiyonel)",
+        validation_alias=AliasChoices(
+            "SLACK_ADMINS",
+            "SLACK_ADMIN_SLACK_ID",
+            "slack_admins_csv",
+        ),
+        description="Virgülle ayrılmış admin Slack user ID (ilk ID tek kullanıcı bekleyen çağrılarda slack_admin_slack_id)",
     )
     slack_command_channels_raw: str = Field(
         "",
@@ -62,6 +68,15 @@ class SystemSettings(BaseSettings):
         ge=1,
         validation_alias=AliasChoices("MONITOR_EVALUATION_INTERVAL", "monitor_evaluation_interval"),
     )
+    pending_challenge_ttl_minutes: int = Field(
+        30,
+        ge=1,
+        validation_alias=AliasChoices(
+            "PENDING_CHALLENGE_TTL_MINUTES",
+            "pending_challenge_ttl_minutes",
+        ),
+        description="Takım kurulumu beklemede kalan geçici challenge kayıtlarının dakika cinsinden ömrü (ChallengeMonitor)",
+    )
 
     evaluation_max_wait_hours: int = Field(
         24,
@@ -76,6 +91,68 @@ class SystemSettings(BaseSettings):
 
     # Groq API
     groq_api_key: Optional[str] = Field(None, description="Groq Cloud API anahtarı")
+    groq_model: Optional[str] = Field(
+        None,
+        validation_alias=AliasChoices("GROQ_MODEL", "groq_model"),
+        description="Groq chat modeli (bos birakilirsa servis varsayilanlari)",
+    )
+
+    summary_max_threads_per_channel: int = Field(
+        35,
+        ge=0,
+        validation_alias=AliasChoices(
+            "SUMMARY_MAX_THREADS_PER_CHANNEL",
+            "summary_max_threads_per_channel",
+        ),
+        description="/channel-summary: kanal başına thread yanıtları çekilecek üst mesaj üst sınırı (0=kapalı)",
+    )
+    summary_max_replies_per_thread: int = Field(
+        45,
+        ge=1,
+        le=300,
+        validation_alias=AliasChoices(
+            "SUMMARY_MAX_REPLIES_PER_THREAD",
+            "summary_max_replies_per_thread",
+        ),
+        description="/channel-summary: bir thread içinde zaman penceresine düşen en fazla yanıt satırı",
+    )
+    summary_max_threads_all: int = Field(
+        12,
+        ge=0,
+        validation_alias=AliasChoices(
+            "SUMMARY_MAX_THREADS_ALL",
+            "summary_max_threads_all",
+        ),
+        description="/channel-summary all: kanal başına thread üst sınırı (daha sıkı)",
+    )
+    summary_max_replies_per_thread_all: int = Field(
+        18,
+        ge=1,
+        le=300,
+        validation_alias=AliasChoices(
+            "SUMMARY_MAX_REPLIES_PER_THREAD_ALL",
+            "summary_max_replies_per_thread_all",
+        ),
+        description="/channel-summary all: thread başına yanıt üst sınırı",
+    )
+    summary_min_words_per_message: int = Field(
+        2,
+        ge=0,
+        le=500,
+        validation_alias=AliasChoices(
+            "SUMMARY_MIN_WORDS_PER_MESSAGE",
+            "summary_min_words_per_message",
+        ),
+        description="/channel-summary: boşluğa göre kelime sayısı; bu eşiğin altı LLM özeline gönderilmez (0=kapalı)",
+    )
+    summary_attribution_label: str = Field(
+        "Özet asistanı",
+        validation_alias=AliasChoices(
+            "SUMMARY_ATTRIBUTION_LABEL",
+            "summary_attribution_label",
+        ),
+        description="/channel-summary son satırında oluşturan adı (bot / ürün adı)",
+    )
 
     # Gemini API
     gemini_api_key: Optional[str] = Field(None, description="Gemini API anahtarı")
@@ -113,6 +190,15 @@ class SystemSettings(BaseSettings):
         description="Etkinlik komut kanalı (C...)",
     )
     event_reminder_enabled: bool = Field(True, description="Hatirlatma sistemi acik/kapali")
+    event_max_pending_per_user: int = Field(
+        0,
+        ge=0,
+        validation_alias=AliasChoices(
+            "EVENT_MAX_PENDING_PER_USER",
+            "event_max_pending_per_user",
+        ),
+        description="Kullanici basina es zamanli bekleyen (pending) talep ust siniri; 0=sinirsiz",
+    )
     event_approval_timeout_hours: int = Field(72, ge=1, description="Admin onay suresi (saat)")
     event_timezone: str = Field("Europe/Istanbul", description="Etkinlik saatlerinin yorumlanacagi IANA timezone (zoneinfo)")
     event_morning_reminder_hour: int = Field(8, ge=0, le=23, description="Gun basi hatirlatma saati (yerel TZ)")
@@ -198,51 +284,26 @@ class SystemSettings(BaseSettings):
             "feature_request_embed_retry_minute",
         ),
     )
-    feature_request_clustering_weekday: int = Field(
-        2,
-        ge=0,
-        le=6,
-        validation_alias=AliasChoices(
-            "FEATURE_REQUEST_CLUSTERING_WEEKDAY",
-            "feature_request_clustering_weekday",
-        ),
-        description="Kumeleme gunu (0=Pzt ... 6=Paz)",
-    )
-    feature_request_cluster_fail_before_pipeline_hour: int = Field(
-        2,
+    feature_request_cluster_retry_hour: int = Field(
+        4,
         ge=0,
         le=23,
         validation_alias=AliasChoices(
-            "FEATURE_REQUEST_CLUSTER_FAIL_BEFORE_PIPELINE_HOUR",
-            "feature_request_cluster_fail_before_pipeline_hour",
+            "FEATURE_REQUEST_CLUSTER_RETRY_HOUR",
+            "feature_request_cluster_retry_hour",
         ),
+        description="clustering_failed kayıtlarını yeniden kümelemeye sokmak için günlük saat",
     )
-    feature_request_cluster_fail_before_pipeline_minute: int = Field(
+    feature_request_cluster_retry_minute: int = Field(
         0,
         ge=0,
         le=59,
         validation_alias=AliasChoices(
-            "FEATURE_REQUEST_CLUSTER_FAIL_BEFORE_PIPELINE_MINUTE",
-            "feature_request_cluster_fail_before_pipeline_minute",
+            "FEATURE_REQUEST_CLUSTER_RETRY_MINUTE",
+            "feature_request_cluster_retry_minute",
         ),
     )
-    feature_request_clustering_hour: int = Field(
-        3,
-        ge=0,
-        le=23,
-        validation_alias=AliasChoices(
-            "FEATURE_REQUEST_CLUSTERING_HOUR", "feature_request_clustering_hour"
-        ),
-    )
-    feature_request_clustering_minute: int = Field(
-        0,
-        ge=0,
-        le=59,
-        validation_alias=AliasChoices(
-            "FEATURE_REQUEST_CLUSTERING_MINUTE",
-            "feature_request_clustering_minute",
-        ),
-    )
+
     feature_request_report_weekday: int = Field(
         5,
         ge=0,
@@ -333,13 +394,10 @@ class SystemSettings(BaseSettings):
     )
 
     def _parsed_slack_admins(self) -> list[str]:
-        raw = (self.slack_admins_raw or "").strip()
-        if raw:
-            return [x.strip() for x in raw.split(",") if x.strip()]
-        sid = (self.slack_admin_slack_id_csv or "").strip()
-        if sid:
-            return [x.strip() for x in sid.split(",") if x.strip()]
-        return []
+        raw = (self.slack_admins_csv or "").strip()
+        if not raw:
+            return []
+        return [x.strip() for x in raw.split(",") if x.strip()]
 
     @property
     def slack_admins(self) -> list[str]:
@@ -363,7 +421,7 @@ class SystemSettings(BaseSettings):
     @model_validator(mode="after")
     def _sync_slack_admin_fields(self) -> SystemSettings:
         if not self._parsed_slack_admins():
-            raise ValueError("SLACK_ADMINS veya SLACK_ADMIN_SLACK_ID tanımlanmalıdır.")
+            raise ValueError("SLACK_ADMINS tanımlanmalıdır (virgülle çoklu ID; SLACK_ADMIN_SLACK_ID eski alias).")
         return self
 
     @model_validator(mode="after")

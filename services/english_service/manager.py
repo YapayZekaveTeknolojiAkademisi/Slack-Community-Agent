@@ -1,7 +1,22 @@
 from services.english_service.session_manager import SessionManager
+from services.english_service.models import Session
 from services.english_service.core.flow_engine import FlowEngine
 from services.english_service.core.writing_mode import WritingMode
 from services.english_service.core.quiz_mode import QuizMode
+
+
+def _clear_active_writing_task(session: Session) -> None:
+    """Quiz'e veya mod değişimine geçerken yazı görevi + bekleyen metni sıfırla (yanlış step ile sessiz ignore önlenir)."""
+    if not hasattr(session, "data") or session.data is None:
+        return
+    for key in (
+        "writing_type",
+        "topic",
+        "source_text",
+        "min_words",
+        "last_writing_feedback",
+    ):
+        session.data.pop(key, None)
 
 
 class EnglishService:
@@ -30,6 +45,7 @@ class EnglishService:
 
         if mode == "quiz":
             session.mode = "quiz"
+            _clear_active_writing_task(session)
             return self.quiz.start_quiz(session)
 
         return self.flow.set_mode(session, mode)

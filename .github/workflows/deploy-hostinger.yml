@@ -1,0 +1,110 @@
+# Hostinger VPS (SSH + Docker) için dağıtım.
+#
+# Sunucu tarafı (bir kez):
+#   1) Docker ve Docker Compose plugin kurulu olsun.
+#   2) Bu repoyu hedef dizine klonlayın (ör. /home/deploy/Slack-Community-Agent).
+#   3) Proje kökünde .env dosyasını oluşturun (.env.template’e göre); repoya eklenmez.
+#   4) SSH kullanıcısı `docker` komutunu çalıştırabilsin (docker grubu veya sudo docker).
+#   5) Sunucudan `git pull` için: deploy key (read) veya HTTPS credential.
+#
+# GitHub → Settings → Secrets and variables → Actions:
+#   HOSTINGER_HOST          Sunucu IP veya alan adı
+#   HOSTINGER_USER          SSH kullanıcı adı
+#   HOSTINGER_SSH_PRIVATE_KEY   OpenSSH özel anahtar (PEM, tam blok)
+#   HOSTINGER_DEPLOY_PATH   Repo kökünün mutlak yolu (örn. /home/deploy/Slack-Community-Agent)
+#
+# İsteğe bağlı:
+#   HOSTINGER_SSH_PORT      Varsayılan 22
+#   HOSTINGER_BRANCH        Varsayılan main
+#   HOSTINGER_DOCKER        Varsayılan "docker"; gerekirse "sudo docker" yazın
+#
+# Disk: `docker compose up -d --build` sonrası temizlik:
+# - image prune -f: yalnızca dangling (<none>) imajlar. Hepsi taglı/aktifse "0B" normaldir (`system df` Images satırı).
+# - builder prune -af: BuildKit iç önbelleğinin tamamı (~10–30 GB sık rastlanır); çalışan imajları silmez, bir sonraki
+#   build daha uzun sürebilir. Volume'lara dokunulmaz. Etiketli ama kullanılmayan imajlar için ayrıca `image prune -a` gerekir.
+# - container prune -f: durdurulmuş konteyner artıkları.
+
+name: Deploy to Hostinger
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-hostinger-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  compose-validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Yerelde .env yokken bile compose içindeki env_file başvurusu parse edilsin diye boş dosya.
+      - name: Placeholder .env for compose config
+        run: touch .env
+
+      - name: Validate Docker Compose file
+        run: docker compose -f docker-compose.yml config --quiet
+
+  deploy:
+    needs: compose-validate
+    runs-on: ubuntu-latest
+
+    steps:
+      # Çok satırlı secret doğrudan `key:` ile drone-ssh'e giderken bozulabiliyor;
+      # dosyaya yazıp `key_path` kullanmak ParsePrivateKey hatalarını giderir.
+      - name: SSH private key dosyaya yaz
+        id: sshkey
+        run: |
+          set -eu
+          KEY_FILE="${RUNNER_TEMP}/hostinger_ed25519"
+          if [ -z "${SSH_PRIVATE_KEY:-}" ]; then
+            echo "::error::HOSTINGER_SSH_PRIVATE_KEY boş veya tanımsız"
+            exit 1
+          fi
+          printf '%s\n' "$SSH_PRIVATE_KEY" > "$KEY_FILE"
+          chmod 600 "$KEY_FILE"
+          if ! grep -q 'BEGIN .*PRIVATE KEY' "$KEY_FILE"; then
+            echo "::error::Secret bir PRIVATE KEY gibi görünmüyor (.pub veya bozuk yapıştırma?)"
+            exit 1
+          fi
+          echo "path=$KEY_FILE" >> "$GITHUB_OUTPUT"
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.HOSTINGER_SSH_PRIVATE_KEY }}
+
+      - name: Deploy over SSH
+        uses: appleboy/ssh-action@v1.2.0
+        env:
+          DEPLOY_PATH: ${{ secrets.HOSTINGER_DEPLOY_PATH }}
+          GIT_BRANCH: ${{ secrets.HOSTINGER_BRANCH }}
+        with:
+          host: ${{ secrets.HOSTINGER_HOST }}
+          username: ${{ secrets.HOSTINGER_USER }}
+          key_path: ${{ steps.sshkey.outputs.path }}
+          port: ${{ secrets.HOSTINGER_SSH_PORT != '' && secrets.HOSTINGER_SSH_PORT || 22 }}
+          envs: DEPLOY_PATH,GIT_BRANCH
+          script_stop: true
+          script: |
+            set -eu
+            BRANCH="${GIT_BRANCH:-main}"
+            test -n "${DEPLOY_PATH:-}" || { echo "HOSTINGER_DEPLOY_PATH boş"; exit 1; }
+            cd "$DEPLOY_PATH"
+            git fetch origin
+            git checkout "$BRANCH"
+            git pull --ff-only origin "$BRANCH"
+            DC="${{ secrets.HOSTINGER_DOCKER }}"
+            if [ -z "${DC}" ]; then DC=docker; fi
+            ${DC} compose -f docker-compose.yml up -d --build
+
+            # image prune çoğunlukla 0B (tüm imajlar active). Build cache için builder/buildx prune -af.
+            echo "=== Docker temizlik: dangling imaj | durdurulmuş konteyner | kullanılmayan build cache (tam) ==="
+            ${DC} image prune -f || true
+            ${DC} container prune -f || true
+            ${DC} builder prune -af || true
+            ${DC} buildx prune -af || true
+
+            echo "=== docker system df ==="
+            ${DC} system df || true

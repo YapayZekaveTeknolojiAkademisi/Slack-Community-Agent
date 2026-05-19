@@ -16,6 +16,7 @@ from packages.slack.client import slack_client
 from ...core.event_loop import run_async
 from ...logger import _logger
 from ...manager import service_manager
+from ...utils.notifications import notify_challenge_eval_completed_admin
 from ...utils.slack_helpers import slack_helper
 
 app: App = slack_client.app
@@ -125,6 +126,9 @@ def handle_jury_evaluation_submission(ack: Ack, body: dict, view):
                 # Commit öncesi snapshot al — commit sonrası attribute'lar expire olur
                 submission = (challenge.meta or {}).get("submission", {})
                 announcement = {
+                    "challenge_id": str(challenge.id),
+                    "challenge_type_id": challenge.challenge_type.id if challenge.challenge_type else None,
+                    "challenge_type_name": challenge.challenge_type.name if challenge.challenge_type else None,
                     "team": [
                         tm.slack_id for tm in challenge.challenge_team_members
                         if tm.slack_id
@@ -162,6 +166,16 @@ def handle_jury_evaluation_submission(ack: Ack, body: dict, view):
 
             # Ortak kanala başarı duyurusu (bot_client — genel kanal)
             if announcement:
+                try:
+                    notify_challenge_eval_completed_admin(
+                        challenge_id=announcement["challenge_id"],
+                        evaluation_channel_id=announcement.get("evaluation_channel_id"),
+                        average_score=average_score,
+                        challenge_type_id=announcement.get("challenge_type_id"),
+                        challenge_type_name=announcement.get("challenge_type_name"),
+                    )
+                except Exception as e:
+                    _logger.error("[EVT] Could not notify admin eval complete: %s", e)
                 try:
                     _post_success_announcement(announcement)
                 except Exception as e:

@@ -7,6 +7,7 @@ import asyncio, signal, sys, threading
 
 from services.feature_request_service.logger import _logger  # noqa: F401 — start_logging (önce)
 from packages.database.manager import db
+from packages.slack.admin_status import post_admin_status
 from packages.slack.client import slack_client
 from services.feature_request_service import handlers as _handlers  # noqa: F401
 from services.feature_request_service.core.event_loop import set_loop
@@ -22,6 +23,13 @@ async def _startup():
 
 async def _shutdown():
     _logger.info("[FR Service] Shutting down...")
+    post_admin_status(
+        "Özellik talebi servisi durduruluyor.",
+        detail_lines=(
+            "Yöneticiler durduruluyor; Slack Socket ve veritabanı oturumu kapatılacak.",
+        ),
+        log=_logger,
+    )
     await service_manager.stop()
     await db.shutdown()
     _logger.info("[FR Service] Shutdown complete")
@@ -58,6 +66,14 @@ def main():
 
     stop_event = threading.Event()
     _install_signals(loop, stop_event)
+
+    post_admin_status(
+        "Özellik talebi servisi başarıyla başlatıldı.",
+        detail_lines=(
+            "Veritabanı ve komut işleyicileri hazır; Socket Mode bağlantısı açılıyor.",
+        ),
+        log=_logger,
+    )
 
     _logger.info("[FR Service] Starting Socket Mode...")
     try:

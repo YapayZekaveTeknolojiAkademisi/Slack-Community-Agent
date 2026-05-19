@@ -27,8 +27,9 @@ def _estimate_tokens(text: str) -> int:
 
 def _format_message(msg: ChannelMessage) -> str:
     """Tek bir mesajı LLM'e gönderilecek metin formatına çevirir."""
-    line = f"[{msg.user_name}]: {msg.text}"
-    if msg.thread_reply_count > 0:
+    prefix = "  ↳ " if msg.is_thread_reply else ""
+    line = f"{prefix}[{msg.user_name}]: {msg.text}"
+    if not msg.is_thread_reply and msg.thread_reply_count > 0:
         line += f" (💬 {msg.thread_reply_count} yanıt)"
     if msg.reactions:
         line += f" [:{':, :'.join(msg.reactions)}:]"

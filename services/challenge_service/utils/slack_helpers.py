@@ -165,6 +165,27 @@ class SlackHelper:
             logger.error(f"Error posting public message to {channel_id}: {str(e)}")
             return None
 
+    def post_ephemeral_or_dm(self, *, channel_id: str, user_id: str, text: str) -> None:
+        """Kanala ephemeral; kanal arşivli veya kullanılamıyorsa kullanıcıya DM."""
+        try:
+            _call(slack_client.user_client.chat_postEphemeral, channel=channel_id, user=user_id, text=text)
+            return
+        except SlackApiError as exc:
+            err = exc.response.get("error") if exc.response else None
+            if err not in ("is_archived", "channel_not_found", "not_in_channel"):
+                raise
+            logger.warning(
+                "chat.postEphemeral başarısız (%s, channel=%s) — DM ile deneniyor",
+                err,
+                channel_id,
+            )
+        try:
+            conv = _call(slack_client.user_client.conversations_open, users=user_id)
+            dm = conv["channel"]["id"]
+            _call(slack_client.user_client.chat_postMessage, channel=dm, text=text)
+        except Exception as e:
+            logger.error("Ephemeral yerine DM gönderilemedi (user=%s): %s", user_id, e)
+
     def update_message(self, channel_id: str, ts: str, text: str, blocks: Optional[List[dict]] = None):
         """Update an existing message."""
         try:
