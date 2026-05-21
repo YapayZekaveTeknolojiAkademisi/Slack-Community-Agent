@@ -22,6 +22,7 @@ RUN pip install --no-cache-dir --upgrade pip && \
 
 COPY packages ./packages
 COPY services ./services
+COPY seeds ./seeds
 COPY migrations ./migrations
 COPY alembic.ini ./alembic.ini
 COPY docker/entrypoint-appuser-hfcache.sh /usr/local/bin/entrypoint.sh
